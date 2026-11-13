@@ -42,16 +42,24 @@ let imageData = null;
  * software rasteriser, so cost scales with pixels filled. 480 px wide keeps a
  * full frame comfortably inside 16 ms and upscales acceptably for a landscape,
  * where softness reads as distance rather than as a mistake.
+ *
+ * devicePixelRatio is applied to the BACKING store only, never to the raster
+ * width. An earlier version multiplied the raster width by dpr as well, which
+ * quietly quadrupled the fill cost on a phone (412 CSS px became 1648 rendered
+ * pixels) -- the exact opposite of the cap this function exists to impose. The
+ * cap is on the simulation of light, not on the display's pixel count.
  */
 function resize() {
   const rect = canvas.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const cssW = Math.max(160, Math.round(rect.width));
   const cssH = Math.max(120, Math.round(rect.height));
+  internalWidth = Math.min(480, cssW);
+  internalHeight = Math.max(1, Math.round((internalWidth * cssH) / cssW));
+  // Backing store matches the device so the upscaled image is not further
+  // resampled by the browser; the raster cost stays at internalWidth^2-ish.
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
-  internalWidth = Math.min(480, Math.round(cssW));
-  internalHeight = Math.max(1, Math.round((internalWidth * cssH) / cssW));
   scene = new Scene(internalWidth, internalHeight, ground);
   imageData = ctx.createImageData(internalWidth, internalHeight);
   camera.zoom = fitZoom(ground, internalWidth, internalHeight, {});
