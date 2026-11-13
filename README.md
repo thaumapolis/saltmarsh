@@ -1,4 +1,5 @@
 # Saltmarsh
+<!-- Front page image: docs/desktop.png -->
 
 **[▶ Play it live](https://raw.githack.com/thaumapolis/saltmarsh/main/index.html)** · [![check](https://github.com/thaumapolis/saltmarsh/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/thaumapolis/saltmarsh/actions/workflows/check.yml)
 
