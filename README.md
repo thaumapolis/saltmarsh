@@ -66,10 +66,35 @@ Every death is recorded by the model itself as a stranding event, at a depth bel
 | buttons | toggle INTAKE / OUTFALL |
 | drag | rotate the view |
 | pinch / scroll | zoom |
-| Speed slider | pause, 1×, 4×, 12× |
+| Speed slider | pause, 1×, 4×, 12×, 24×, 72×, 168× |
 | Intake size | 0.3–6 m² |
 
 Works with touch; portrait and landscape both lay out without clipping.
+
+## The year
+
+The clock runs through a 365-day year, and one number — the season — drives three
+things at once: how far a shallow flat warms above the sea, the rain rate, and the
+label in the header. In summer the marsh is warm and productive, so fish push far
+onto the flat and the stranding risk is at its highest; in winter the warmth
+incentive almost vanishes and they hold the channel. **The same sluice operation is
+a different decision depending on the month**, which is what turns a timing puzzle
+into management.
+
+Rain (~640 mm/yr) and evaporation (~666 mm/yr) nearly cancel over a year, so a
+sealed marsh neither fills forever nor dries out instantly — it can be managed
+down, and the season decides how fast.
+
+Sediment makes the marsh surface itself a record of your water management.
+Regularly flooded cells build up toward ~9 mm/yr, fastest where the water is a
+5–20 cm sheet, which is the real feedback in a grazing marsh: flooding builds a
+flat, a shallower flat floods more gently, and builds more. A cell left dry for
+more than about two weeks starts losing elevation instead. The header shows the
+mean change in millimetres.
+
+At 168× (one simulated day per second) a year passes in six minutes, so the
+seasons and the marsh surface are things you can watch rather than facts of the
+model. At 1× a year is ten real days.
 
 ## Building and testing
 
