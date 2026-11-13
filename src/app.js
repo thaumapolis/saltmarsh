@@ -8,8 +8,8 @@
  */
 import { buildGround, GRID, wetArea, CELL_AREA_M2, worldUnits } from './marsh.js';
 import { camera, fitZoom, Scene } from './render.js';
-import { initialState, seedFish, step, meanSurface, HOURS_PER_STEP } from './sim.js';
-import { census, fishState } from './life.js';
+import { initialState, seedFish, step, meanSurface, HOURS_PER_STEP, EPOCH_YEAR } from './sim.js';
+import { census, fishState, calendar } from './life.js';
 import { seaLevel, springNeapHours, CONSTITUENTS } from './tide.js';
 
 
@@ -98,6 +98,22 @@ function commitPixels() {
   ctx.drawImage(holder, 0, 0, canvas.width, canvas.height);
 }
 
+/**
+ * Season in words, from the continuous season index rather than a date range.
+ *
+ * Derived from the same number the physics uses, so the word on screen cannot
+ * disagree with the warmth and rain the model is applying. Named in thirds of the
+ * index because "midwinter"/"midsummer" are the points where the curve turns;
+ * a calendar-based name would need its own table of boundaries to maintain.
+ */
+function seasonName(season) {
+  if (season < -0.75) return 'midwinter';
+  if (season < -0.25) return 'late winter';
+  if (season < 0.25) return 'spring';
+  if (season < 0.75) return 'early summer';
+  return 'midsummer';
+}
+
 function clockText(hours) {
   const day = Math.floor(hours / 24) + 1;
   const h = Math.floor(hours % 24);
@@ -178,6 +194,21 @@ function updateReadout() {
 
   el('clock').textContent = t.day;
   el('clock').nextElementSibling.textContent = t.time;
+
+  // The season is read from the same clock as the tide, so the player can see
+  // that the moon and the year are running on one timeline rather than two.
+  const cal = calendar(state.hours, EPOCH_YEAR);
+  el('seasonLabel').textContent = seasonName(cal.season);
+  el('yearLabel').textContent = String(cal.year);
+
+  // Marsh surface change: the slow consequence of a year of water management.
+  // Mean over the marsh, reported in millimetres because metres round to 0.00
+  // for a year's work.
+  const change = state.elevationChange;
+  let changeSum = 0;
+  for (let k = 0; k < change.length; k += 1) changeSum += change[k];
+  const meanMm = (changeSum / change.length) * 1000;
+  el('surfaceLabel').textContent = `${meanMm >= 0 ? '+' : ''}${meanMm.toFixed(1)} mm`;
   el('tideLabel').textContent = rising ? 'tide rising' : 'tide falling';
   el('tideHeight').textContent = `${sea >= 0 ? '+' : ''}${sea.toFixed(2)} m`;
   el('wetLabel').textContent = `${((wet / total) * 100).toFixed(0)}%`;
@@ -252,8 +283,23 @@ canvas.addEventListener('touchmove', (e) => {
   pinchDistance = d;
 }, { passive: false });
 
-const SPEEDS = [0, 1, 4, 12];
+/**
+ * Simulation hours advanced per real second, indexed by the speed slider.
+ *
+ * The top settings exist so the year is reachable. At 1x a year is 8,766
+ * simulated hours, i.e. ten days of real time, and the seasons -- warmth, rain,
+ * and the marsh surface rising or sinking -- are then a fact of the model that no
+ * player will ever watch change. The upper steps trade per-tide legibility for a
+ * view of the annual and multi-year behaviour, which is where the sediment term
+ * lives; 24x is one simulated day per second, so a year passes in six minutes and
+ * a decade in under an hour.
+ */
+const SPEEDS = [0, 1, 4, 12, 24, 72, 168];
 let speedIndex = 1;
+
+// The slider's range comes from the table rather than a max="N" in the markup,
+// which was a second copy of the table's length and silently pinned the top speed
+// to whatever it was written against.
 
 /**
  * Setting this to 0 pauses the model without touching the UI control.
@@ -268,6 +314,7 @@ Object.defineProperty(window, '__saltmarshPause', {
   configurable: true,
 });
 
+el('speed').max = String(SPEEDS.length - 1);
 el('speed').addEventListener('input', (e) => {
   speedIndex = Number(e.target.value);
   el('speedOut').textContent = `${SPEEDS[speedIndex]}×`;

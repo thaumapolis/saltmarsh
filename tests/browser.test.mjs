@@ -167,6 +167,50 @@ const browser = await firefox.launch();
   const sluiceAfter = await page.evaluate(() => window.__saltmarsh.state.sluice.open);
   ok(sluiceBefore !== sluiceAfter, 'the intake button toggles the simulation');
 
+  // The annual layer must be visible, not merely simulated. Driving the clock
+  // forward and reading the labels catches a HUD that is computed but never
+  // refreshed, or a season string that never leaves its initial value -- both of
+  // which pass every other check in this file because they look at the model.
+  const hud = await page.evaluate(() => {
+    const read = () => ({
+      season: document.getElementById('seasonLabel').textContent,
+      year: document.getElementById('yearLabel').textContent,
+      surface: document.getElementById('surfaceLabel').textContent,
+    });
+    const before = read();
+    const w = window.__saltmarsh;
+    const s = w.state;
+    // ~4 months forward: far enough to cross a season boundary, and the marsh
+    // surface must have moved off zero if sediment is doing anything.
+    for (let n = 0; n < 24 * 4 * 120; n += 1) {
+      s.sluice.open = true;
+      w.step(s, 0.25);
+    }
+    const model = {
+      hours: s.hours,
+      meanMm: (Array.from(s.elevationChange).reduce((a, v) => a + v, 0) / s.elevationChange.length) * 1000,
+    };
+    return { before, model };
+  });
+  // After stepping, the animation loop needs a frame to repaint the readout.
+  await page.waitForTimeout(120);
+  const hudAfter = await page.evaluate(() => ({
+    season: document.getElementById('seasonLabel').textContent,
+    year: document.getElementById('yearLabel').textContent,
+    surface: document.getElementById('surfaceLabel').textContent,
+  }));
+  ok(hud.model.hours > 24 * 100, 'the clock advances through the model', Math.round(hud.model.hours));
+  ok(hudAfter.season !== hud.before.season,
+    'the season label changes as the year advances', `${hud.before.season} -> ${hudAfter.season}`);
+  ok(hudAfter.surface !== hud.before.surface,
+    'the marsh surface readout updates with accretion', `${hud.before.surface} -> ${hudAfter.surface}`);
+  ok(Math.abs(hud.model.meanMm) > 0.01,
+    'the marsh surface has measurably changed over 120 days', `${hud.model.meanMm.toFixed(2)} mm`);
+  // The label must agree with the model rather than showing a stale or invented number.
+  const shownMm = Number.parseFloat(hudAfter.surface.replace('+', ''));
+  ok(Math.abs(shownMm - hud.model.meanMm) < 0.1,
+    'the surface label agrees with the model', `label ${shownMm} vs model ${hud.model.meanMm.toFixed(2)}`);
+
   await ctx.close();
 }
 

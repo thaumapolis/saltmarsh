@@ -153,7 +153,12 @@ export function calendar(hours, epochYear) {
   const doy = dayOfYear(hours);
   const yearNumber = epochYear + Math.floor(hours / 24 / YEAR_DAYS);
   const monthIndex = Math.min(11, Math.floor((doy / YEAR_DAYS) * 12));
-  return { month: MONTH_NAMES[monthIndex], year: yearNumber, doy };
+  return {
+    month: MONTH_NAMES[monthIndex],
+    year: yearNumber,
+    doy,
+    season: seasonIndex(doy),
+  };
 }
 
 /**

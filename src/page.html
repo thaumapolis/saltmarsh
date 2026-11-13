@@ -19,6 +19,8 @@
 
     <div id="readout" aria-live="polite">
       <div class="stat"><b id="clock">day 1</b><span>06:00</span></div>
+      <div class="stat"><b id="seasonLabel">midwinter</b><span id="yearLabel">2026</span></div>
+      <div class="stat"><b id="surfaceLabel">0 mm</b><span>marsh surface</span></div>
       <div class="stat"><b id="tideLabel">rising</b><span id="tideHeight">+0.00 m</span></div>
       <div class="stat"><b id="wetLabel">0%</b><span>marsh flooded</span></div>
       <div class="stat"><b id="fishLabel">0</b><span>fish alive</span></div>
@@ -42,7 +44,7 @@
     </div>
     <div class="control sliders">
       <label for="speed">Speed <output id="speedOut">1&times;</output></label>
-      <input id="speed" type="range" min="0" max="3" step="1" value="1" aria-label="Simulation speed">
+      <input id="speed" type="range" min="0" step="1" value="1" aria-label="Simulation speed">
       <label for="drain">Intake size <output id="drainOut">2.4 m&sup2;</output></label>
       <input id="drain" type="range" min="0.3" max="6" step="0.1" value="2.4" aria-label="Intake opening area">
     </div>
