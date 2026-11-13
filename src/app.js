@@ -255,6 +255,19 @@ canvas.addEventListener('touchmove', (e) => {
 const SPEEDS = [0, 1, 4, 12];
 let speedIndex = 1;
 
+/**
+ * Setting this to 0 pauses the model without touching the UI control.
+ * Tests need a still image: comparing the renderer's buffer against the canvas
+ * across an animation frame compares two different water levels and reports a
+ * mismatch that is not a bug.
+ */
+Object.defineProperty(window, '__saltmarshPause', {
+  set(value) {
+    speedIndex = value ? 0 : speedIndex;
+  },
+  configurable: true,
+});
+
 el('speed').addEventListener('input', (e) => {
   speedIndex = Number(e.target.value);
   el('speedOut').textContent = `${SPEEDS[speedIndex]}×`;
@@ -365,4 +378,27 @@ requestAnimationFrame(frame);
 
 // Exposed for the tests only: they need to drive the sim deterministically
 // rather than race the animation clock.
-window.__saltmarsh = { state, camera, census, seaLevel, step, fitZoom, ground };
+window.__saltmarsh = {
+  state,
+  camera,
+  census,
+  seaLevel,
+  step,
+  fitZoom,
+  ground,
+  // The renderer's own buffer, so a test can compare what was intended against
+  // what the canvas ended up showing. Without this the only way to notice a
+  // stride error is to look at the screenshot.
+  get sceneRgb() {
+    return scene.rgb;
+  },
+  get sceneWidth() {
+    return internalWidth;
+  },
+  get sceneHeight() {
+    return internalHeight;
+  },
+  set speed(value) {
+    speedIndex = value <= 0 ? 0 : Math.max(1, SPEEDS.indexOf(value));
+  },
+};

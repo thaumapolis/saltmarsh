@@ -1,0 +1,36 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned, as everywhere in this organisation: an unpinned action is an
+      # unreviewed supply-chain dependency that changes under CI.
+      - uses: cachix/install-nix-action@v31.11.3
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same entrypoint as local development, so "works locally" and "CI is green"
+      # are the same statement rather than two similar ones.
+      - name: Run the acceptance checklist
+        run: nix develop --command ./check.sh
+
+      # Playwright is downloaded into the Nix store by the pinned driver, so the
+      # browser version is fixed by flake.lock rather than by whatever the runner
+      # image happened to ship.
+      - name: Record the toolchain actually used
+        if: always()
+        run: |
+          echo "nixpkgs: $(nix flake metadata --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["inputs"]["nixpkgs"]["locked"]["rev"])')"
+          echo "lock:    $(sha256sum flake.lock | cut -c1-12)"
