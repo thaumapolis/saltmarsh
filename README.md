@@ -85,7 +85,7 @@ $ nix run .#default                    # (no-op: it is a file, open index.html)
 
 1. **build** — concatenate `src/*.js` into one self-contained `index.html`.
 2. **artifact guarantees** — no external file references, no web storage, no ES-module syntax left in the bundle.
-3. **model** — 33 behavioural checks with no browser: volume conservation to float precision, flow direction and its √head scaling, the level-surface invariant, the gradient decaying without amplifying, and the trade-off itself (that one strategy loses fish and another loses none, with every death recorded by the model as a stranding below the swim-depth threshold).
+3. **model** — 52 behavioural checks with no browser: volume conservation to float precision, flow direction and its √head scaling, the level-surface invariant, the gradient decaying without amplifying, and the trade-off itself (that one strategy loses fish and another loses none, with every death recorded by the model as a stranding below the swim-depth threshold).
 4. **browser** — 13 checks against the **built** file: no page errors, the canvas holds a shaded landscape rather than a flat fill, the scene buffer is genuinely 4 bytes per pixel, dragging rotates the view, and the whole thing runs and paints inside a sandboxed opaque-origin iframe that reports its own state — so silence is a failure rather than a pass.
 
 ## Design notes

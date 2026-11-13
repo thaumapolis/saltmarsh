@@ -102,6 +102,95 @@ export function habitatValue(depthM, algae, temperatureF) {
 }
 
 /**
+ * The year. Everything here is a function of day-of-year rather than a table of
+ * per-season constants, so the seasons cannot disagree with each other and a
+ * change to the year length propagates by construction.
+ *
+ * Why an annual cycle at all: without one, every decision the player makes has
+ * the same value forever, so the game is a single timing puzzle repeated. With
+ * one, the *same* sluice operation is a good idea in June and a disaster in
+ * August, because what the marsh needs and what the fish are doing both move
+ * through the year. That gives management somewhere to go.
+ */
+export const YEAR_DAYS = 365.25;
+
+/**
+ * Day of year, 0..365.25, from elapsed simulated hours.
+ *
+ * Day 0 is mid-winter, so the phase is chosen once, here, and every seasonal
+ * consumer reads the same curve. The app labels months from this too, so the
+ * calendar in the UI cannot drift from the physics.
+ */
+export function dayOfYear(hours) {
+  const days = hours / 24;
+  return days - Math.floor(days / YEAR_DAYS) * YEAR_DAYS;
+}
+
+/**
+ * Seasonal index, -1 (midwinter) .. +1 (midsummer), as a cosine of day-of-year.
+ * Derived rather than scheduled: one number drives warmth, plant growth, and the
+ * month label, so they are the same season by construction.
+ */
+export function seasonIndex(dayOfYearM) {
+  return -Math.cos((2 * Math.PI * dayOfYearM) / YEAR_DAYS);
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/**
+ * Month name and year number for the clock.
+ *
+ * Month boundaries come from dividing the year into twelve equal parts of the
+ * cosine phase, which is approximate as a calendar goes -- it is a simulation of
+ * seasons, not of the Gregorian reckoning. Stated here because the app shows this
+ * string to the player next to a physically-derived tide, and the reader is
+ * entitled to know which parts are which.
+ */
+export function calendar(hours, epochYear) {
+  const doy = dayOfYear(hours);
+  const yearNumber = epochYear + Math.floor(hours / 24 / YEAR_DAYS);
+  const monthIndex = Math.min(11, Math.floor((doy / YEAR_DAYS) * 12));
+  return { month: MONTH_NAMES[monthIndex], year: yearNumber, doy };
+}
+
+/**
+ * How strongly shallow water warms above the sea, scaled by season.
+ *
+ * In winter a flat and a channel are close to the same temperature, so the
+ * warmth incentive to enter the marsh nearly vanishes and fish hold the refuge.
+ * In summer the flat is markedly warmer and food-rich, so they push onto it and
+ * take the stranding risk. The player's drain therefore has different
+ * consequences by season, which is the point.
+ */
+export function temperatureFactorForSeason(season) {
+  return 0.25 + 0.75 * ((season + 1) / 2);
+}
+
+/**
+ * Rainfall in millimetres per hour, by season.
+ *
+ * Calibrated so the mean over a year is RAINFALL_MM_PER_H_MEAN, which is
+ * ~640 mm/yr: the figure for a temperate maritime marsh in southern England
+ * (London's annual precipitation is reported as 615-716 mm depending on period
+ * and station). The seasonal swing follows the real one -- wetter in the cold
+ * half, drier in late summer -- without changing the annual total.
+ *
+ * The calibration matters more than it looks. An earlier version of this curve
+ * peaked at 1.8 mm/h, which is ~15,800 mm/yr if sustained: twenty-five times the
+ * real rate. Rain then beat evaporation in every season, so a sealed marsh filled
+ * forever and could never be managed down -- the model was not wrong in its
+ * structure, it was wrong in its units, and the symptom was a pool that rose past
+ * the highest tide. Cross-check any rate written here against its annual total.
+ */
+export const RAINFALL_MM_PER_H_MEAN = 0.073;
+export function rainfallMmPerHForSeason(season) {
+  return RAINFALL_MM_PER_H_MEAN * (1 - 0.45 * season);
+}
+
+/**
  * Trophic accounting for the whole pool. Computed from the grid on demand rather
  * than tracked incrementally, so the readout cannot disagree with the simulation
  * it describes: there is no second number to go stale.

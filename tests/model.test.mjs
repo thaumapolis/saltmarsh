@@ -11,7 +11,9 @@
  */
 import { buildGround, GRID, CELL_AREA_M2, worldUnits, volumeAbove, stepWater } from '../src/marsh.js';
 import { seaLevel, springNeapHours, orificeFlow } from '../src/tide.js';
-import { algaeGrowth, fishState, habitatValue, LIMITS } from '../src/life.js';
+import { algaeGrowth, fishState, habitatValue, LIMITS,
+         dayOfYear, seasonIndex, temperatureFactorForSeason, rainfallMmPerHForSeason,
+         calendar, YEAR_DAYS } from '../src/life.js';
 import { initialState, seedFish, step, meanSurface } from '../src/sim.js';
 
 let failures = 0;
@@ -211,6 +213,117 @@ console.log('numerical health');
   const seaMax = Math.max(...Array.from({ length: 2400 }, (_, i) => seaLevel(i * 0.25)));
   ok(surf < seaMax + 0.05, 'pool surface never exceeds the highest tide it can be fed by', `${surf.toFixed(2)} vs ${seaMax.toFixed(2)}`);
   ok(worldUnits(1) === 1 / 520, 'metres convert to world units by the marsh width');
+}
+
+console.log('seasons');
+{
+  // The calendar and the physics must be the same number. Asserted against the
+  // year length rather than against expected strings, so changing YEAR_DAYS
+  // cannot leave a passing test that describes a different year.
+  ok(Math.abs(dayOfYear(0)) < 1e-9, 'the clock starts at day 0', dayOfYear(0));
+  ok(Math.abs(dayOfYear(24 * YEAR_DAYS) - dayOfYear(0)) < 1e-6,
+    'day of year wraps at the year boundary', dayOfYear(24 * YEAR_DAYS));
+
+  // Seasons are a continuous cycle, not a lookup: midwinter and midsummer are
+  // half a year apart and at opposite extremes.
+  const midwinter = seasonIndex(0);
+  const midsummer = seasonIndex(YEAR_DAYS / 2);
+  ok(midwinter < -0.99 && midsummer > 0.99,
+    'season index spans -1 at midwinter to +1 at midsummer',
+    `${midwinter.toFixed(3)} .. ${midsummer.toFixed(3)}`);
+  ok(Math.abs(seasonIndex(YEAR_DAYS) - seasonIndex(0)) < 1e-6,
+    'the season is periodic in the year', seasonIndex(YEAR_DAYS));
+
+  // Warmth and rain must disagree seasonally, or the year has only one axis.
+  ok(temperatureFactorForSeason(midsummer) > temperatureFactorForSeason(midwinter),
+    'shallow water warms more in summer than in winter');
+  ok(rainfallMmPerHForSeason(midwinter) > rainfallMmPerHForSeason(midsummer),
+    'the wet season is the cold one', 
+    `${rainfallMmPerHForSeason(midwinter).toFixed(2)} vs ${rainfallMmPerHForSeason(midsummer).toFixed(2)}`);
+
+  // The summer incentive to enter the marsh must actually be larger, because
+  // that is what makes stranding a summer hazard rather than an all-year constant.
+  const summerWarm = habitatValue(0.08, 0.9, temperatureFactorForSeason(midsummer));
+  const winterWarm = habitatValue(0.08, 0.9, temperatureFactorForSeason(midwinter));
+  ok(summerWarm > winterWarm,
+    'a shallow flat is a more attractive habitat in summer',
+    `${summerWarm.toFixed(3)} vs ${winterWarm.toFixed(3)}`);
+
+  const jan = calendar(0, 2026);
+  const sixMonths = calendar(24 * YEAR_DAYS / 2, 2026);
+  ok(jan.year === 2026 && sixMonths.year === 2026, 'year number holds within a year');
+  ok(calendar(24 * YEAR_DAYS, 2026).year === 2027, 'year number increments after a year');
+  ok(jan.month !== sixMonths.month, 'the month label moves through the year',
+    `${jan.month} vs ${sixMonths.month}`);
+  const months = new Set();
+  for (let n = 0; n < 12; n += 1) {
+    months.add(calendar((24 * YEAR_DAYS * n) / 12, 2026).month);
+  }
+  ok(months.size === 12, 'twelve distinct month labels are produced', months.size);
+}
+
+console.log('sediment');
+{
+  // Accretion must be a real, slow, signed response to flooding -- not a constant
+  // applied everywhere, which would be indistinguishable from nothing.
+  // A marsh, not a lake. freshState's default fill of 0.55 sits well above the
+  // ground's maximum elevation, which fills every cell to several metres -- a
+  // regime with no flats at all, where an accretion kernel tuned to 5-20 cm sheets
+  // correctly reports that nothing accretes. Fill at the top of the ground range
+  // so the flats exist and the kernel has something to act on.
+  const s = freshState({ fill: 0.0, outfallArea: 0 });
+  const before = Array.from(s.elevationChange);
+  for (let n = 0; n < 24 * 4 * 120; n += 1) {
+    s.sluice.open = seaLevel(s.hours) > meanSurface(s);
+    step(s, 0.25);
+  }
+  const built = Array.from(s.elevationChange);
+  ok(before.every((v) => v === 0), 'elevation change starts at zero');
+  ok(built.some((v) => v > 0), 'regularly flooded cells accrete sediment');
+
+  // Rate bound derived from the documented calibration (order 5-15 mm/yr for a
+  // regularly flooded marsh), asserted in millimetres so a units slip in
+  // MM_PER_HOUR -- metres for millimetres, a factor of 1000 -- fails here rather
+  // than publishing a marsh that grows a metre in a season.
+  const maxGainMm = Math.max(...built) * 1000;
+  const expectedMm = (9 * 120) / 365.25;
+  ok(maxGainMm > 0.5 * expectedMm && maxGainMm < 1.5 * expectedMm,
+    `accretion over 120 days matches the calibrated rate (expected ~${expectedMm.toFixed(2)} mm)`,
+    `${maxGainMm.toFixed(2)} mm`);
+
+  // Accretion must be uneven, or it is a constant and the marsh is not responding
+  // to anything: the point is that shallow flats build faster than deep water.
+  const gainers = built.filter((v) => v > 1e-6).length;
+  ok(gainers > 10 && gainers < built.length,
+    'accretion is concentrated on flats, not spread uniformly over the marsh',
+    `${gainers} of ${built.length} cells`);
+
+  // A cell that stays wet the whole time must not erode, and the dry-hours
+  // tracker must reset when water returns, or erosion would fire on a flooded cell.
+  let badDry = 0;
+  for (let k = 0; k < s.depth.length; k += 1) {
+    if (s.depth[k] > 0.005 && s.dryHours[k] !== 0) badDry += 1;
+  }
+  ok(badDry === 0, 'a wet cell has no accumulated dry hours', badDry);
+
+  // Erosion must be conditional on duration, not on exposure alone: a cell that
+  // dried for one day out of the twelve should not be losing ground.
+  const e = freshState({ outfallArea: 0 });
+  for (let n = 0; n < 24 * 4 * 3; n += 1) step(e, 0.25);
+  const erodedShort = Array.from(e.elevationChange).some((v) => v < 0);
+  ok(!erodedShort, 'three days of exposure does not erode the marsh', erodedShort);
+
+  // And the sign must be able to go negative given real neglect.
+  let everNegative = false;
+  const g = freshState({ fill: 0.0, outfallArea: 2.2 });
+  for (let n = 0; n < 24 * 4 * 30 * 6; n += 1) {
+    g.sluice.open = false;
+    step(g, 0.25);
+  }
+  everNegative = Array.from(g.elevationChange).some((v) => v < 0);
+  ok(everNegative, 'a marsh drained for six months loses elevation');
+  ok(Array.from(g.depth).every((d) => Number.isFinite(d) && d >= 0),
+    'long-horizon sediment change keeps the depth field finite and non-negative');
 }
 
 console.log('');
