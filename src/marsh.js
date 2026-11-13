@@ -23,6 +23,32 @@
 
 export const GRID = 96;
 
+/**
+ * The marsh is METRES wide. This is the single conversion between the elevation
+ * field (metres, because tides and orifice flow are in metres) and the renderer's
+ * normalised 0..1 plan coordinates.
+ *
+ * Getting this wrong is invisible in isolation and fatal in combination: an
+ * earlier version passed raw metres straight into a projection whose x and y were
+ * 0..1, so 2.78 m of relief drew as 278% of the marsh's own width and the view
+ * was a vertical smear. Nothing failed -- the numbers were all "reasonable", only
+ * the ratio between them was nonsense. Every place that turns a metre into a
+ * screen distance must divide by this, so the ratio has one definition.
+ *
+ * 520 m across with 2.8 m of relief is a plausible small coastal grazing marsh,
+ * and gives a relief-to-width ratio of 0.54%.
+ */
+export const MARSH_WIDTH_M = 520;
+
+/** Elevation in metres to renderer world units (same units as normalised x, y). */
+export function worldUnits(metres) {
+  return metres / MARSH_WIDTH_M;
+}
+
+/** Side length of one cell, in metres. Used for volumes and flow. */
+export const CELL_SIDE_M = MARSH_WIDTH_M / GRID;
+
+
 export function index(i, j) {
   return j * GRID + i;
 }
