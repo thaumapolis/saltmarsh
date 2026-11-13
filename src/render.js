@@ -156,7 +156,12 @@ export function fitZoom(ground, width, height, options) {
 }
 
 /** Directional light plus ambient sky fill, from the facet normal. */
-function shade(base, nx, ny, nz) {
+/**
+ * Shade a flat facet from its (already normalised) normal: one directional light
+ * plus ambient sky fill. Argument order is normal-then-colour so the call sites
+ * read as "shade this normal, with this colour".
+ */
+export function shade(nx, ny, nz, base) {
   const len = Math.hypot(0.42, -0.55, 0.72);
   const dot = (nx * 0.42 + ny * -0.55 + nz * 0.72) / len;
   const k = 0.44 + 0.56 * Math.max(0, dot);
@@ -209,4 +214,162 @@ export function waterColour(depthM, algae) {
   ];
 }
 
-export { SKY_TOP, SKY_BOTTOM, shade };
+export { SKY_TOP, SKY_BOTTOM };
+
+/**
+ * Framebuffer renderer: terrain into a colour buffer plus a depth buffer.
+ *
+ * WHY A Z-BUFFER RATHER THAN PAINTING QUADS FAR-TO-NEAR
+ * The obvious approach -- sort cells by depth and draw -- was tried first and
+ * produced a stippled, broken-looking marsh, and the cause is worth recording
+ * because nothing about it is a maths error: with 96x96 cells on a 900 px canvas
+ * each cell rasterises to about 4 x 2 pixels, so any per-quad point-in-quad test
+ * leaves sub-pixel gaps between neighbours. The shapes were correct and only the
+ * *coverage* was wrong, which unit tests cannot see and looking at the image
+ * finds immediately. A depth buffer makes coverage exact regardless of how small
+ * the cells are, and removes the need to reason about sort order under yaw.
+ */
+export class Scene {
+  constructor(width, height, ground) {
+    this.width = width;
+    this.height = height;
+    this.ground = ground;
+    this.rgb = new Uint8ClampedArray(width * height * 3);
+    this.depth = new Float32Array(width * height);
+  }
+
+  /** Paint sky. Called before the terrain; the terrain then overwrites where it lands. */
+  paintSky() {
+    const { width, height, rgb, depth } = this;
+    for (let y = 0; y < height; y += 1) {
+      const t = y / (height - 1);
+      const r = SKY_TOP[0] + (SKY_BOTTOM[0] - SKY_TOP[0]) * t;
+      const g = SKY_TOP[1] + (SKY_BOTTOM[1] - SKY_TOP[1]) * t;
+      const b = SKY_TOP[2] + (SKY_BOTTOM[2] - SKY_TOP[2]) * t;
+      for (let x = 0; x < width; x += 1) {
+        const k = (y * width + x) * 3;
+        rgb[k] = r;
+        rgb[k + 1] = g;
+        rgb[k + 2] = b;
+        depth[y * width + x] = Infinity;
+      }
+    }
+  }
+
+  _splat(x0, x1, y0, y1, z, colour) {
+    const { width, height, rgb, depth } = this;
+    const xa = Math.max(0, Math.ceil(x0));
+    const xb = Math.min(width - 1, Math.floor(x1));
+    const ya = Math.max(0, Math.ceil(y0));
+    const yb = Math.min(height - 1, Math.floor(y1));
+    for (let py = ya; py <= yb; py += 1) {
+      const row = py * width;
+      for (let px = xa; px <= xb; px += 1) {
+        const idx = row + px;
+        if (z < depth[idx]) {
+          depth[idx] = z;
+          const k = idx * 3;
+          rgb[k] = colour[0];
+          rgb[k + 1] = colour[1];
+          rgb[k + 2] = colour[2];
+        }
+      }
+    }
+  }
+
+  /**
+   * Draw the marsh at the given water surface elevation (metres).
+   *
+   * Order within a cell matters: the bed is farther from the eye than the water
+   * above it, so water is splatted at a nearer depth and wins the test wherever
+   * the bed is submerged. Getting this backwards shows the riverbed sitting on
+   * top of the surface, which is exactly what an earlier attempt looked like.
+   */
+  paintWater(worldSurfaceMetres, algaeField) {
+    const { ground, width, height } = this;
+    const u = 1 / (GRID - 1);
+    const surface = worldUnits(worldSurfaceMetres);
+
+    for (let j = 0; j < GRID - 1; j += 1) {
+      for (let i = 0; i < GRID - 1; i += 1) {
+        const k = j * GRID + i;
+        const e00 = ground[k];
+        const e10 = ground[k + 1];
+        const e01 = ground[k + GRID];
+        const e11 = ground[k + GRID + 1];
+        const cx = (i + 0.5) * u;
+        const cyy = (j + 0.5) * u;
+
+        const bed = (e00 + e10 + e01 + e11) / 4;
+        const algae = algaeField === null ? 0 : algaeField[k];
+
+        // Bed / mud.
+        const bc = project(cx, cyy, worldUnits(bed), width, height);
+        if (bc !== null) {
+          const a = project(i * u, j * u, worldUnits(e00), width, height);
+          const b = project((i + 1) * u, j * u, worldUnits(e10), width, height);
+          const c = project((i + 1) * u, (j + 1) * u, worldUnits(e11), width, height);
+          const d = project(i * u, (j + 1) * u, worldUnits(e01), width, height);
+          if (a !== null && b !== null && c !== null && d !== null) {
+            const nx = -(e10 - e00);
+            const ny = -(e01 - e00);
+            const nrm = Math.hypot(nx, ny, 1);
+            const k = shade(nx / nrm, ny / nrm, 1 / nrm, groundColour(bed, algae));
+            this._splat(
+              Math.min(a[0], b[0], c[0], d[0]),
+              Math.max(a[0], b[0], c[0], d[0]),
+              Math.min(a[1], b[1], c[1], d[1]),
+              Math.max(a[1], b[1], c[1], d[1]),
+              bc[2],
+              k,
+            );
+          }
+        }
+
+        // Water surface, only where this cell holds water.
+        if (bed < worldSurfaceMetres) {
+          const wc = project(cx, cyy, surface, width, height);
+          if (wc !== null) {
+            const wa = project(i * u, j * u, surface, width, height);
+            const wb = project((i + 1) * u, j * u, surface, width, height);
+            const wq = project((i + 1) * u, (j + 1) * u, surface, width, height);
+            const wd = project(i * u, (j + 1) * u, surface, width, height);
+            if (wa !== null && wb !== null && wq !== null && wd !== null) {
+              const col = waterColour(worldSurfaceMetres - bed, algae);
+              this._splat(
+                Math.min(wa[0], wb[0], wq[0], wd[0]),
+                Math.max(wa[0], wb[0], wq[0], wd[0]),
+                Math.min(wa[1], wb[1], wq[1], wd[1]),
+                Math.max(wa[1], wb[1], wq[1], wd[1]),
+                wc[2],
+                col,
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * A thin marker for the levee/sluice the player controls, drawn as a bright
+   * slab so it stays findable at any zoom. Deliberately simple: the sluice is an
+   * interface element, and an interface element that needs shading to be seen is
+   * competing with the terrain for the player's attention.
+   */
+  paintSluice(worldPos, colour) {
+    const { width, height } = this;
+    const half = 0.5 / GRID;
+    const p0 = project(worldPos - half, 0.5 - half * 6, worldUnits(0.6), width, height);
+    const p1 = project(worldPos + half, 0.5 + half * 6, worldUnits(-0.4), width, height);
+    if (p0 === null || p1 === null) return;
+    this._splat(
+      Math.min(p0[0], p1[0]),
+      Math.max(p0[0], p1[0]),
+      Math.min(p0[1], p1[1]),
+      Math.max(p0[1], p1[1]),
+      -1,
+      colour,
+    );
+  }
+}

@@ -68,6 +68,40 @@ export function fishState(depthM) {
 }
 
 /**
+ * Where fish actually want to be, as a per-cell score.
+ *
+ * THIS IS THE BIOLOGY THAT MAKES THE GAME A GAME.
+ * The earlier version had fish sit in the deepest cell and flee upward, which
+ * means they never enter the marsh and can never be stranded: the dramatic
+ * fail state was unreachable no matter how the player operated the sluice, and
+ * four strategies produced four different water levels and zero fish deaths.
+ *
+ * Real fish enter a saltmarsh on the flood for a reason -- the shallow, warm,
+ * productive shallows are a nursery. They are not hiding from the tide, they
+ * are feeding, and they accept the risk of being left behind because the food
+ * is worth it. That is what the tide-pool trade-off actually is.
+ *
+ * So value is a balance, not a monotone preference for depth:
+ *   + warmth and food where the water is shallow and the bed is productive
+ *   - danger where depth is below the refuge threshold
+ * The balance point, and therefore how boldly a fish sits on a flat, is the
+ * single dial that decides whether the marsh is a larder or a trap.
+ */
+export function habitatValue(depthM, algae, temperatureF) {
+  if (depthM <= 0.005) return -1;
+  // Food: proportional to algal productivity on the bed.
+  const food = Math.min(1.4, algae) * 0.9;
+  // Warmth: shallow water heats up; a full-depth column stays near sea temperature.
+  const warmth = Math.exp(-depthM / 0.18) * 0.5 * temperatureF;
+  // Risk: sharp once depth falls under the refuge threshold, because that is
+  // where a wading bird or a draining pool stops being survivable.
+  const risk = depthM < LIMITS.fishRefugeDepth
+    ? Math.pow((LIMITS.fishRefugeDepth - depthM) / LIMITS.fishRefugeDepth, 1.6) * 2.2
+    : 0;
+  return food + warmth - risk;
+}
+
+/**
  * Trophic accounting for the whole pool. Computed from the grid on demand rather
  * than tracked incrementally, so the readout cannot disagree with the simulation
  * it describes: there is no second number to go stale.
