@@ -1,4 +1,8 @@
-index.html
+# The built artifact is committed, as it is in every other project here:
+# the org's showcase clones repos and opens index.html directly, and the
+# offline-proof check reads that file from the clone. A build product a
+# reader needs is not a scratch file. check.sh rebuilds it before testing,
+# so a stale commit is caught rather than shipped.
 .tmp/
 node_modules/
 __pycache__/

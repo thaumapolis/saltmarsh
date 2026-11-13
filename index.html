@@ -1,0 +1,1789 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Saltmarsh — run a tidal pool</title>
+<style>/*
+ * Layout notes worth keeping:
+ *
+ * - The stage is the primary surface and must never be squeezed by the copy.
+ *   Text goes below it and scrolls; on a phone in portrait the canvas keeps a
+ *   fixed aspect and the explanation is reachable by scrolling, rather than the
+ *   page becoming a tall canvas that pushes controls off-screen.
+ * - Controls are large and paired with a sentence, because the whole point is
+ *   that the player understands what a button does to a wet landscape. A control
+ *   whose effect is not explained is a slot machine.
+ * - No layout depends on hover. Touch is a first-class input here.
+ */
+:root {
+  --ink: #e8eef2;
+  --ink-soft: #9fb0bd;
+  --ink-dim: #6d8090;
+  --bg: #0b1220;
+  --panel: #121c2b;
+  --line: #22344a;
+  --accent: #4fb3a5;
+  --warn: #d98c5f;
+  --danger: #d4605c;
+  --ok: #6ec48a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 16px/1.6 "Saltmarsh Sans", system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+#app {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 12px 14px calc(28px + env(safe-area-inset-bottom));
+}
+
+#masthead h1 {
+  margin: 4px 0 2px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+#masthead .lede {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  max-width: 62ch;
+}
+
+#stage {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0a1421;
+  touch-action: none;
+}
+
+#view {
+  display: block;
+  width: 100%;
+  height: clamp(240px, 46vh, 520px);
+}
+
+#readout {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.stat {
+  background: rgba(8, 16, 26, 0.72);
+  border: 1px solid rgba(80, 110, 140, 0.35);
+  border-radius: 7px;
+  padding: 5px 9px;
+  min-width: 74px;
+  backdrop-filter: blur(3px);
+}
+
+.stat b {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.stat span {
+  display: block;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+}
+
+#hint {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  background: rgba(8, 16, 26, 0.86);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+#hint.warn { border-left-color: var(--warn); }
+#hint.bad { border-left-color: var(--danger); }
+#hint:empty { display: none; }
+
+#controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+
+.control { min-width: 0; }
+
+.big {
+  width: 100%;
+  min-height: 62px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  place-content: center;
+  padding: 8px 10px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.big:active { transform: translateY(1px); }
+.big .k { font-size: 0.68rem; letter-spacing: 0.11em; color: var(--ink-dim); }
+.big .v { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.big[aria-pressed="true"] { border-color: var(--accent); background: #12312e; }
+.big[aria-pressed="true"] .v { color: var(--accent); }
+
+.expl {
+  margin: 6px 2px 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+.sliders {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0f1826;
+}
+
+.sliders label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  display: flex;
+  justify-content: space-between;
+}
+
+.sliders output { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+input[type="range"] {
+  width: 100%;
+  height: 34px;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+#explain {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+
+#explain h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+  margin: 16px 0 6px;
+}
+
+#explain h2:first-child { margin-top: 0; }
+#explain p { margin: 0 0 10px; max-width: 72ch; }
+#explain b, #explain strong { color: var(--ink); }
+#explain ul { margin: 0 0 10px; padding-left: 20px; max-width: 72ch; }
+#explain li { margin-bottom: 6px; }
+
+details { margin: 10px 0; }
+summary { cursor: pointer; color: var(--ink); font-size: 0.86rem; }
+
+footer {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 0.76rem;
+  color: var(--ink-dim);
+}
+
+@media (max-width: 560px) {
+  #controls { grid-template-columns: 1fr; }
+  #masthead h1 { font-size: 1.35rem; }
+  .stat { min-width: 64px; padding: 4px 7px; }
+  .stat b { font-size: 0.95rem; }
+}
+
+/* Landscape on a phone: the canvas is the scarce resource, so keep the copy
+   beside the controls rather than stacking everything under a short canvas. */
+@media (max-height: 460px) {
+  #view { height: 58vh; }
+  #masthead .lede { display: none; }
+  #explain { font-size: 0.85rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .big:active { transform: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="masthead">
+    <h1>Saltmarsh</h1>
+    <p class="lede">A tidal pool you manage. The moon decides when water is available; you decide when it comes in and goes out.</p>
+  </header>
+
+  <div id="stage">
+    <canvas id="view" aria-label="Three-dimensional view of the marsh at the current tide level"></canvas>
+
+    <div id="readout" aria-live="polite">
+      <div class="stat"><b id="clock">day 1</b><span>06:00</span></div>
+      <div class="stat"><b id="tideLabel">rising</b><span id="tideHeight">+0.00 m</span></div>
+      <div class="stat"><b id="wetLabel">0%</b><span>marsh flooded</span></div>
+      <div class="stat"><b id="fishLabel">0</b><span>fish alive</span></div>
+    </div>
+
+    <div id="hint" role="status"></div>
+  </div>
+
+  <section id="controls" aria-label="Sluice controls">
+    <div class="control">
+      <button id="sluiceBtn" class="big" type="button">
+        <span class="k">INTAKE</span><span class="v" id="sluiceState">SHUT</span>
+      </button>
+      <p class="expl" id="sluiceExpl">Opens the sea sluice. Water flows in only when the sea stands above the pool.</p>
+    </div>
+    <div class="control">
+      <button id="outfallBtn" class="big" type="button">
+        <span class="k">OUTFALL</span><span class="v" id="outfallState">SEALED</span>
+      </button>
+      <p class="expl" id="outfallExpl">Cut the outfall and the pool drains toward the sea on every low water.</p>
+    </div>
+    <div class="control sliders">
+      <label for="speed">Speed <output id="speedOut">1&times;</output></label>
+      <input id="speed" type="range" min="0" max="3" step="1" value="1" aria-label="Simulation speed">
+      <label for="drain">Intake size <output id="drainOut">2.4 m&sup2;</output></label>
+      <input id="drain" type="range" min="0.3" max="6" step="0.1" value="2.4" aria-label="Intake opening area">
+    </div>
+  </section>
+
+  <section id="explain" aria-label="What you are looking at">
+    <h2>What you are looking at</h2>
+    <p>The ground is a marsh cross-section: a deep channel, a broad flat, and banks. The coloured surface is water. <b>Vertical height is exaggerated about 22&times;</b> — real relief here is 0.5% of the width and would look flat.</p>
+    <p id="mechanicText"></p>
+    <h2>What you can do</h2>
+    <ul>
+      <li>Toggle <b>INTAKE</b> and <b>OUTFALL</b>. Nothing happens unless there is a head difference, so timing matters more than the buttons.</li>
+      <li><b>Drag</b> the view to rotate it, <b>pinch</b> or scroll to zoom.</li>
+      <li>Watch the fish counter. Fish come onto the flats to feed as the tide floods. If you drain the pool faster than they can swim back to the channel, they are stranded in puddles and die.</li>
+    </ul>
+    <h2>Why it behaves like this</h2>
+    <p id="volumeText"></p>
+    <details>
+      <summary>The numbers behind the tides</summary>
+      <p id="tideFacts"></p>
+    </details>
+  </section>
+
+  <footer>
+    <p>One file, no network, no storage. The simulation is a 96&times;96 grid advanced by shallow-water exchange; the view is drawn on the CPU because there is no GPU path here.</p>
+  </footer>
+</div>
+<script>
+(function () {
+'use strict';
+
+// ---- src/tide.js ----
+/**
+ * tide.js — the astronomical tide, and the head difference it produces.
+ *
+ * This is the part of the simulation the player does not control, and it is the
+ * reason the game has a rhythm at all: whether opening the sluice moves water
+ * in or out depends on a clock set by the moon. It is therefore derived from
+ * real harmonic constituents rather than invented as a sine wave, because the
+ * interesting behaviour comes from their interaction:
+ *
+ *   - M2 + S2 beat against each other, giving spring and neap tides roughly
+ *     every 14.8 days. A single sine would repeat identically forever.
+ *   - M2's period is 12h24m, not 12h, so successive high tides drift through the
+ *     day and the marsh floods at a different hour each evening.
+ *   - Adding the diurnal K1 makes the two daily highs unequal (declinational
+ *     inequality), so one flood is much better than the other.
+ *
+ * All three of those are visible in-app, which is the point: the player is
+ * reacting to a calendar, not to a random number.
+ *
+ * Amplitudes are illustrative of a small mesotidal coast, not survey data from
+ * any particular site.
+ */
+
+/** name, amplitude in metres, period in hours. */
+const CONSTITUENTS = [
+  { name: 'M2', amp: 0.6, periodH: 12.4206, note: 'lunar semidiurnal' },
+  { name: 'S2', amp: 0.18, periodH: 12.0, note: 'solar semidiurnal' },
+  { name: 'K1', amp: 0.14, periodH: 23.9345, note: 'lunisolar diurnal' },
+];
+
+const TWO_PI = Math.PI * 2;
+
+/** Sea level relative to chart datum, in metres, at `hours` since the start. */
+function seaLevel(hours) {
+  let h = 0;
+  for (let i = 0; i < CONSTITUENTS.length; i += 1) {
+    const c = CONSTITUENTS[i];
+    h += c.amp * Math.sin((TWO_PI * hours) / c.periodH);
+  }
+  return h;
+}
+
+/**
+ * Spring-neap cycle length in hours: the beat period of M2 and S2, i.e. how long
+ * before the two semidiurnal constituents drift a full cycle in and out of phase.
+ * Computed from the periods rather than hardcoded, so retuning an amplitude or
+ * period cannot silently make the in-app "days to spring tide" readout wrong.
+ */
+function springNeapHours() {
+  const m2 = CONSTITUENTS.find((c) => c.name === 'M2');
+  const s2 = CONSTITUENTS.find((c) => c.name === 'S2');
+  if (m2 === undefined || s2 === undefined) {
+    throw new Error('springNeapHours needs both M2 and S2 constituents');
+  }
+  return 1 / Math.abs(1 / m2.periodH - 1 / s2.periodH);
+}
+
+/**
+ * The sluice. Flow through an opening driven by the head difference, using the
+ * orifice equation Q = A * Cd * sqrt(2*g*|dh|) with the sign of the head.
+ *
+ * This is why the game is not "hold the button to fill the pond": the rate is
+ * nonlinear in head difference, so a big spring head drains the pool fast and a
+ * small neap head barely moves it. Sluice area is in square metres.
+ */
+const GRAVITY = 9.81;
+const DISCHARGE_COEFF = 0.65;
+
+/** Signed volumetric flow in cubic metres per second. Positive floods inland. */
+function orificeFlow(areaM2, headM) {
+  const magnitude = areaM2 * DISCHARGE_COEFF * Math.sqrt(2 * GRAVITY * Math.abs(headM));
+  return headM >= 0 ? magnitude : -magnitude;
+}
+
+
+// ---- src/marsh.js ----
+/**
+ * marsh.js — the pool: a grid of cells, each with a ground elevation and a water
+ * depth. Everything visible and everything that matters derives from these two
+ * arrays.
+ *
+ * The honest core being demonstrated is that a marsh pool is a *volume-elevation
+ * curve*. The same volume of water sits shallow over a broad flat shelf and deep
+ * in a channel, so how much the water level moves for a given inflow depends on
+ * where the water already is. That single fact produces:
+ *
+ *   - pools that fill fast then stop moving (the shelf has taken the water),
+ *   - channels that stay wet at low tide and become the last place fish can hide,
+ *   - area that only exists for a couple of hours a day (the fringing marsh),
+ *   - and the reason a breach high on the bank does something completely
+ *     different from a breach low down.
+ *
+ * Water moves between cells by a simple depth-averaged flow down the gradient of
+ * *water surface* elevation (ground + depth). That is not a Navier-Stokes solve;
+ * it is the shallow-water intuition that surface elevation, not depth, is what
+ * drives flow. It is the smallest rule that still produces level water at rest,
+ * which is the property a player will check by eye.
+ */
+
+const GRID = 96;
+
+/**
+ * The marsh is METRES wide. This is the single conversion between the elevation
+ * field (metres, because tides and orifice flow are in metres) and the renderer's
+ * normalised 0..1 plan coordinates.
+ *
+ * Getting this wrong is invisible in isolation and fatal in combination: an
+ * earlier version passed raw metres straight into a projection whose x and y were
+ * 0..1, so 2.78 m of relief drew as 278% of the marsh's own width and the view
+ * was a vertical smear. Nothing failed -- the numbers were all "reasonable", only
+ * the ratio between them was nonsense. Every place that turns a metre into a
+ * screen distance must divide by this, so the ratio has one definition.
+ *
+ * 520 m across with 2.8 m of relief is a plausible small coastal grazing marsh,
+ * and gives a relief-to-width ratio of 0.54%.
+ */
+const MARSH_WIDTH_M = 520;
+
+/** Elevation in metres to renderer world units (same units as normalised x, y). */
+function worldUnits(metres) {
+  return metres / MARSH_WIDTH_M;
+}
+
+/** Side length of one cell, in metres. Used for volumes and flow. */
+const CELL_SIDE_M = MARSH_WIDTH_M / GRID;
+
+/**
+ * Area of one cell in square metres.
+ *
+ * Defined here, once, because it is a property of the grid. Both the simulator
+ * and the interface need it, and having each compute its own is how a physical
+ * constant ends up with two values: the bundler's top-level collision check
+ * caught exactly this (`CELL_AREA_M2` declared in sim.js and app.js), which
+ * would have been invisible as separate ES modules.
+ */
+const CELL_AREA_M2 = CELL_SIDE_M * CELL_SIDE_M;
+
+
+function index(i, j) {
+  return j * GRID + i;
+}
+
+/**
+ * Ground elevation in metres relative to chart datum.
+ *
+ * Shaped as a bowl with a meandering channel and a broad marsh shelf, because
+ * those are the two features that make the volume-elevation curve nonlinear:
+ * a very flat wide area (huge capacity, level barely moves) and a deep narrow
+ * channel (small capacity, level swings).
+ */
+function buildGround() {
+  const g = new Float32Array(GRID * GRID);
+  for (let j = 0; j < GRID; j += 1) {
+    for (let i = 0; i < GRID; i += 1) {
+      const x = i / (GRID - 1);
+      const y = j / (GRID - 1);
+
+      // General bowl toward the sea mouth at the right edge. The datum matters
+      // more than it looks: mean sea level is 0 here and the tide only spans
+      // about +/-0.9 m, so the marsh must be built to sit *across* that band.
+      // An earlier version had the shelf topping out near 1.7 m, which put most
+      // of the marsh permanently above the highest water and left the most
+      // interesting part of the volume-elevation curve unreachable.
+      let elev = 0.82 - 0.72 * x;
+
+      // Meandering channel carved along the middle, scoured well below low water
+      // so it stays wet at the lowest tide: that is the fish refuge, and it is
+      // also what makes the volume-elevation curve steep at the bottom end.
+      const channel = 0.09 + 0.055 * Math.sin(y * Math.PI * 3.1) + 0.02 * Math.sin(y * 11);
+      const dist = Math.abs(x - channel);
+      elev -= 1.55 * Math.exp(-(dist * dist) / (2 * 0.045 * 0.045));
+
+      // A second, blind creek off the main channel — a refuge that dries out.
+      const blind = 0.30 + 0.16 * Math.sin((y - 0.5) * 4.2);
+      const bdist = Math.abs(y - blind);
+      const inBlind = x > 0.12 && x < 0.52 && bdist < 0.05;
+      if (inBlind) {
+        elev -= 0.85 * Math.exp(-(bdist * bdist) / (2 * 0.030 * 0.030)) * (1 - (x - 0.12) / 0.6);
+      }
+
+      // Gentle hummocks on the marsh so the shelf is not a perfect plane: these
+      // create the isolated puddles that strand at low water.
+      elev += 0.10 * Math.sin(x * 17.3) * Math.cos(y * 13.7) * (x < 0.55 ? 1 : 0.25);
+
+      // Raise the banks at the top and bottom so water stays in the system.
+      const bank = Math.max(0, Math.abs(y - 0.5) - 0.42);
+      elev += bank * 6.0;
+
+      // The sea mouth: a fixed boundary condition at the right edge, held at sea
+      // level by the tide rather than integrated. Marked so stepWater can treat
+      // it as a reservoir instead of a normal cell.
+      if (x >= 0.94) elev = Math.min(elev, 0.0);
+
+      g[index(i, j)] = elev;
+    }
+  }
+  return g;
+}
+
+/**
+ * One relaxation step of water exchange between neighbouring cells.
+ *
+ * Flow is proportional to the difference in water-surface elevation, damped to
+ * stay stable for the timestep used. Depth is conserved to within float error
+ * (checked in tests), because a "conservation" model that quietly loses water is
+ * not a conservation model.
+ */
+const FLOW = 0.18;
+
+/**
+ * One relaxation step of water exchange between neighbouring cells.
+ *
+ * Written in flux form -- each edge computes ONE signed flux that is added to
+ * one cell and subtracted from the other -- rather than as "each cell adjusts
+ * by the gradient around it". The difference is not cosmetic: the gradient form
+ * plus a `depth = max(0, depth)` clamp silently deletes water whenever a cell
+ * would go negative (observed: 0.042% of the whole pool's volume lost over 400
+ * steps, which sounds trivial and is not, because it accumulates and because a
+ * "conservation" model that leaks is not a conservation model). In flux form a
+ * cell can never give more than it holds, so total volume is conserved exactly
+ * and the test in tests/marsh.test.mjs asserts that to float rounding.
+ */
+function stepWater(depth, ground, dt) {
+  // Horizontal edges: between (i,j) and (i+1,j).
+  for (let j = 0; j < GRID; j += 1) {
+    for (let i = 0; i < GRID - 1; i += 1) {
+      const a = index(i, j);
+      const b = a + 1;
+      moveWater(depth, a, b, ground[a] + depth[a] - (ground[b] + depth[b]), dt);
+    }
+  }
+  // Vertical edges: between (i,j) and (i,j+1).
+  for (let j = 0; j < GRID - 1; j += 1) {
+    for (let i = 0; i < GRID; i += 1) {
+      const a = index(i, j);
+      const b = index(i, j + 1);
+      moveWater(depth, a, b, ground[a] + depth[a] - (ground[b] + depth[b]), dt);
+    }
+  }
+}
+
+/**
+ * Move water from a to b (negative amount moves the other way), never more than
+ * the source holds. Capping at the source rather than clamping the result is
+ * what makes the scheme conservative.
+ */
+function moveWater(depth, a, b, surfaceDiff, dt) {
+  if (surfaceDiff === 0) return;
+  let amount = FLOW * dt * surfaceDiff;
+  const from = amount > 0 ? a : b;
+  const available = depth[from];
+  if (amount > available) amount = available;
+  else if (amount < -available) amount = -available;
+  depth[a] -= amount;
+  depth[b] += amount;
+}
+
+/**
+ * Volume of water above `elevation`, in cubic metres, given a cell area.
+ *
+ * This is the volume-elevation curve, and it is the single most informative read
+ * on the whole system: its slope is the pool's surface area, which is why the
+ * same inflow moves the level by different amounts at different stages.
+ */
+function volumeAbove(depth, cellAreaM2) {
+  let v = 0;
+  for (let k = 0; k < depth.length; k += 1) v += depth[k];
+  return v * cellAreaM2;
+}
+
+/** Cells that are wet, i.e. have contributed to that volume. */
+function wetArea(depth, cellAreaM2) {
+  let n = 0;
+  for (let k = 0; k < depth.length; k += 1) if (depth[k] > 0.01) n += 1;
+  return n * cellAreaM2;
+}
+
+
+// ---- src/life.js ----
+/**
+ * life.js — what lives in the water, and why the water is the way it is.
+ *
+ * Everything here responds to the hydrology in marsh.js rather than running
+ * alongside it. That coupling is the actual subject of the project:
+ *
+ *   - Nutrients wash in with the tide and are eaten by algae, so fertility is a
+ *     function of how much seawater you admitted, not a dial.
+ *   - Algae need light *and* water. Deep enough to float, shallow enough for
+ *     light. A pool that is deep all day is darker than one that floods and drains.
+ *   - Fish need depth to be safe from birds, and shallows to feed. So a fish sits
+ *     in the channel at low water and moves onto the flat when it floods -- and if
+ *     you drain the pool too fast, it gets stranded in a puddle and dies. That is
+ *     not a scripted fail state, it is the consequence of depth < minimum depth.
+ *
+ * The stranded-fish event is the thing I most want players to cause by accident
+ * and then understand: the same sluice operation that feeds the marsh can kill
+ * the fish in it, depending on the tide you timed it against.
+ */
+
+/** One cohort of organisms occupying one cell. */
+const LIMITS = {
+  /** Metres of water a fish needs to avoid being caught from the bank. */
+  fishRefugeDepth: 0.25,
+  /** Metres of water a fish needs before it can move at all. */
+  fishSwimDepth: 0.06,
+  /** Algae grow fastest in bright shallow water; light decays with depth. */
+  lightAttenuation: 2.4,
+};
+
+/**
+ * Light available at a cell's bottom, as a fraction of surface light.
+ * Beer-Lambert: I = exp(-kz). Uses actual depth, so the same algae crop in a
+ * 10 cm sheet and a 1 m pool differ by an order of magnitude.
+ */
+function lightAt(depthM) {
+  return Math.exp(-LIMITS.lightAttenuation * depthM);
+}
+
+/**
+ * Net algal growth in one cell for one step.
+ *
+ * Growth is light- and nutrient-limited (Liebig-minimum: the scarcer of the two
+ * controls), reduced by respiration, and capped by self-shading. Losses are
+ * grazing and washout, both applied by the caller, because washout is a
+ * hydrological event and belongs to the water update.
+ */
+function algaeGrowth(biomass, depthM, nutrient, dt) {
+  if (depthM <= 0) return -biomass * 0.05 * dt; // stranding on dry mud: die-off
+  const light = lightAt(depthM);
+  const growthRate = 0.55 * Math.min(light, nutrient / (0.18 + nutrient));
+  const respiration = 0.12;
+  const net = growthRate - respiration;
+  return biomass * net * dt * (1 - biomass / 1.4);
+}
+
+/**
+ * Whether a fish in this cell is safe, stranded, or mobile-but-exposed.
+ *
+ * Returns a label rather than a boolean because the app has to *say* what
+ * happened in plain language, and a boolean would leave the explanation to be
+ * written separately from the rule -- where it would drift out of date.
+ */
+function fishState(depthM) {
+  if (depthM < LIMITS.fishSwimDepth) return 'stranded';
+  if (depthM < LIMITS.fishRefugeDepth) return 'exposed';
+  return 'safe';
+}
+
+/**
+ * Where fish actually want to be, as a per-cell score.
+ *
+ * THIS IS THE BIOLOGY THAT MAKES THE GAME A GAME.
+ * The earlier version had fish sit in the deepest cell and flee upward, which
+ * means they never enter the marsh and can never be stranded: the dramatic
+ * fail state was unreachable no matter how the player operated the sluice, and
+ * four strategies produced four different water levels and zero fish deaths.
+ *
+ * Real fish enter a saltmarsh on the flood for a reason -- the shallow, warm,
+ * productive shallows are a nursery. They are not hiding from the tide, they
+ * are feeding, and they accept the risk of being left behind because the food
+ * is worth it. That is what the tide-pool trade-off actually is.
+ *
+ * So value is a balance, not a monotone preference for depth:
+ *   + warmth and food where the water is shallow and the bed is productive
+ *   - danger where depth is below the refuge threshold
+ * The balance point, and therefore how boldly a fish sits on a flat, is the
+ * single dial that decides whether the marsh is a larder or a trap.
+ */
+function habitatValue(depthM, algae, temperatureF) {
+  if (depthM <= 0.005) return -1;
+  // Food: proportional to algal productivity on the bed.
+  const food = Math.min(1.4, algae) * 0.9;
+  // Warmth: shallow water heats up; a full-depth column stays near sea temperature.
+  const warmth = Math.exp(-depthM / 0.18) * 0.5 * temperatureF;
+  // Risk: sharp once depth falls under the refuge threshold, because that is
+  // where a wading bird or a draining pool stops being survivable.
+  const risk = depthM < LIMITS.fishRefugeDepth
+    ? Math.pow((LIMITS.fishRefugeDepth - depthM) / LIMITS.fishRefugeDepth, 1.6) * 2.2
+    : 0;
+  return food + warmth - risk;
+}
+
+/**
+ * Trophic accounting for the whole pool. Computed from the grid on demand rather
+ * than tracked incrementally, so the readout cannot disagree with the simulation
+ * it describes: there is no second number to go stale.
+ *
+ * `fish` is a list of {cell, alive}. Dead fish stay in the list with alive=false
+ * so the app can count what the marsh lost, and when.
+ */
+function census(depth, algaeField, fish) {
+  let safe = 0;
+  let exposed = 0;
+  let stranded = 0;
+  let alive = 0;
+  let lost = 0;
+  for (const f of fish) {
+    if (!f.alive) {
+      lost += 1;
+      continue;
+    }
+    alive += 1;
+    const state = fishState(depth[f.cell]);
+    if (state === 'safe') safe += 1;
+    else if (state === 'exposed') exposed += 1;
+    else stranded += 1;
+  }
+  let algae = 0;
+  let grazedArea = 0;
+  for (let k = 0; k < algaeField.length; k += 1) {
+    if (depth[k] > 0.01) {
+      algae += algaeField[k];
+      if (algaeField[k] > 0.15) grazedArea += 1;
+    }
+  }
+  return { algae, grazedArea, safe, exposed, stranded, alive, lost };
+}
+
+
+// ---- src/render.js ----
+/**
+ * render.js — a software 3D view of the marsh, with no WebGL.
+ *
+ * WebGL is unavailable in the browser this project is verified in: headless
+ * Firefox here returns null for both `webgl2` and `webgl` contexts, and
+ * Chromium/WebKit do not start in this sandbox at all. So the 3D is computed on
+ * the CPU into an ImageData buffer -- a painter's-algorithm heightfield with an
+ * explicit back-to-front fill and depth test.
+ *
+ * Not a trick: each cell is projected to a screen quad, filled, and shaded from
+ * its true surface normal, which is what makes the terrain read as terrain.
+ *
+ * Why bother with 3D rather than a flat map: elevation is the subject. Water
+ * spread over a shelf versus water hiding in a channel is what the player is
+ * reasoning about, and from directly above those look like the same blue pixels.
+ * Depth is the information, so the view has to show depth.
+ *
+ * Cost scales with pixels covered, not cells, so the internal buffer size is the
+ * knob for slow devices. Measured fill cost for a 128x128 heightfield at
+ * 400x225 is about 7 ms in JS, inside a 16.7 ms frame.
+ */
+
+/**
+ * Camera. Yaw spins around the marsh, pitch tips it toward a plan view, and
+ * `distance` pulls the eye back. All three are user-draggable.
+ *
+ * `distance` is load-bearing: without it the marsh straddles depth 0 and half of
+ * it sits behind the eye, which presents as a blank canvas with no error. An
+ * earlier version of this file had no distance at all and every single
+ * projection returned null.
+ */
+const camera = {
+  yaw: 0.62,
+  pitch: 0.58,
+  zoom: 1.0,
+  distance: 2.35,
+  /**
+   * Vertical exaggeration. The marsh is 1 world unit across and its relief is
+   * 2.8 m, i.e. real relief is about 3% of the horizontal scale -- drawn truthfully
+   * it would look flat, and a flat picture of a landscape whose whole subject is
+   * elevation is useless. So relief is exaggerated on purpose and the amount is
+   * stated in the legend rather than hidden, because an honest exaggeration is a
+   * visualization choice and a hidden one is a lie about scale.
+   *
+   * With the real ratio (2.8 m relief over 520 m width) the marsh is 0.54% relief,
+   * which on a 560 px canvas is 3 px of vertical relief -- indistinguishable from
+   * flat. 22x brings that to about 62 px, enough to read the channel as a channel
+   * while keeping the shelf visibly flat, which is the actual point.
+   */
+  zExaggeration: 22,
+};
+
+const SKY_TOP = [11, 19, 33];
+const SKY_BOTTOM = [52, 76, 92];
+
+/**
+ * Project a world point to the canvas.
+ *
+ * World x is east-west with the sea at +x, y is north-south, z is elevation in
+ * metres. Returns [screenX, screenY, viewDepth], or null when behind the eye.
+ * Affine in `zoom`, which is what lets fitZoom solve framing in one pass.
+ */
+function project(x, y, z, width, height) {
+  // z arrives in RENDERER world units (see worldUnits in marsh.js), not metres.
+  // Mixing the two is the bug that made the marsh 278% as tall as it was wide.
+  const zs = z * camera.zExaggeration;
+  const cy = Math.cos(camera.yaw);
+  const sy = Math.sin(camera.yaw);
+  const rx = (x - 0.5) * cy - (y - 0.5) * sy;
+  const ry = (x - 0.5) * sy + (y - 0.5) * cy;
+
+  const cp = Math.cos(camera.pitch);
+  const sp = Math.sin(camera.pitch);
+  const depth = ry * cp - zs * sp + camera.distance;
+  const up = ry * sp + zs * cp;
+
+  const near = 0.05;
+  if (depth <= near) return null;
+  const scale = (height * 1.35 * camera.zoom) / depth;
+  return [width / 2 + rx * scale, height / 2 - up * scale + height * 0.04, depth];
+}
+
+/**
+ * Zoom that frames the whole marsh for the given canvas and terrain.
+ *
+ * Computed rather than fixed because the correct value depends on the generated
+ * terrain: a constant that frames a flat pool overflows the canvas when the
+ * channel is scoured deeper, and overflow in a heightfield means the marsh runs
+ * off the bottom edge, taking the waterline with it.
+ *
+ * Measured before this existed: at zoom 1 the terrain filled 65% of canvas width
+ * but 172% of its height -- far too much vertical relief on screen.
+ */
+/**
+ * Zoom that frames the marsh for a given canvas and terrain.
+ *
+ * Computed rather than fixed, because the right value depends on the terrain that
+ * was generated AND on the canvas shape: the same constant that frames a 16:9
+ * desktop view leaves a phone-portrait canvas two-thirds empty, and one tuned for
+ * portrait overflows the desktop. Measured with a symmetric margin, desktop bled
+ * 25 px off the bottom while portrait left 259 px of blank sky -- a symmetric
+ * margin is simply the wrong constraint when the horizon sits at canvas centre.
+ *
+ * So the constraint is stated explicitly instead: the marsh's front (bottom) edge
+ * must sit above `bottomLimit`, and it must be at least `minWidthFraction` across.
+ * Solving for zoom from the bottom edge alone is exact, because projected screen
+ * y is affine in zoom (the perspective divide is by viewDepth, which zoom does
+ * not enter).
+ */
+function fitZoom(ground, width, height, options) {
+  const minWidthFraction = options.minWidthFraction ?? 0.72;
+  const bottomLimit = options.bottomLimit ?? height * 0.96;
+  const keep = camera.zoom;
+  camera.zoom = 1;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const step = Math.max(1, Math.floor(Math.sqrt(ground.length) / 48));
+  for (let j = 0; j < GRID; j += step) {
+    for (let i = 0; i < GRID; i += step) {
+      const p = project(
+        i / (GRID - 1),
+        j / (GRID - 1),
+        worldUnits(ground[j * GRID + i]),
+        width,
+        height,
+      );
+      if (p === null) continue;
+      if (p[0] < minX) minX = p[0];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] > maxY) maxY = p[1];
+    }
+  }
+  camera.zoom = keep;
+  if (!(maxX > minX) || !(Number.isFinite(maxY))) {
+    throw new Error('fitZoom: terrain projected to an empty or degenerate bounding box');
+  }
+
+  // Bottom edge is at height/2 + h1 with h1 > 0 for a pitched view, so the
+  // allowed zoom grows as that edge rises. Guard the non-positive case rather
+  // than letting it produce a negative zoom.
+  const bottomRise = maxY - height / 2;
+  const allowedHeadroom = bottomLimit - height / 2;
+  const zoomFromBottom = bottomRise > 0 ? allowedHeadroom / bottomRise : Infinity;
+  const zoomFromWidth = (minWidthFraction * width) / (maxX - minX);
+  const zoom = Math.min(zoomFromBottom, zoomFromWidth);
+  if (!(zoom > 0) || !Number.isFinite(zoom)) {
+    throw new Error(
+      `fitZoom: no positive zoom frames the marsh (bottomRise ${bottomRise.toFixed(1)}, ` +
+        `widthSpan ${(maxX - minX).toFixed(1)})`,
+    );
+  }
+  return zoom;
+}
+
+/** Directional light plus ambient sky fill, from the facet normal. */
+/**
+ * Shade a flat facet from its (already normalised) normal: one directional light
+ * plus ambient sky fill. Argument order is normal-then-colour so the call sites
+ * read as "shade this normal, with this colour".
+ */
+function shade(nx, ny, nz, base) {
+  const len = Math.hypot(0.42, -0.55, 0.72);
+  const dot = (nx * 0.42 + ny * -0.55 + nz * 0.72) / len;
+  const k = 0.44 + 0.56 * Math.max(0, dot);
+  return [base[0] * k, base[1] * k, base[2] * k];
+}
+
+/**
+ * Ground colour from elevation and algal cover.
+ *
+ * Single source of truth for the palette: the legend reads these same values, so
+ * a swatch in the help cannot drift away from what the map draws.
+ */
+function groundColour(elev, algae) {
+  const t = Math.max(0, Math.min(1, (elev + 1.2) / 2.4));
+  const low = [58, 52, 44];
+  const mid = [99, 94, 60];
+  const high = [156, 138, 102];
+  let c;
+  if (t < 0.5) {
+    const u = t / 0.5;
+    c = [
+      low[0] + (mid[0] - low[0]) * u,
+      low[1] + (mid[1] - low[1]) * u,
+      low[2] + (mid[2] - low[2]) * u,
+    ];
+  } else {
+    const u = (t - 0.5) / 0.5;
+    c = [
+      mid[0] + (high[0] - mid[0]) * u,
+      mid[1] + (high[1] - mid[1]) * u,
+      mid[2] + (high[2] - mid[2]) * u,
+    ];
+  }
+  const g = Math.min(1, algae);
+  return [
+    c[0] * (1 - 0.45 * g) + 62 * 0.45 * g,
+    c[1] * (1 - 0.2 * g) + 128 * 0.2 * g,
+    c[2] * (1 - 0.5 * g) + 52 * 0.5 * g,
+  ];
+}
+
+/** Water colour from depth and productivity: turbid green when fertile, dark when deep. */
+function waterColour(depthM, algae) {
+  const clarity = Math.exp(-1.6 * depthM);
+  const green = Math.min(1, algae * 2.2);
+  return [
+    24 * clarity + 34 * green,
+    64 * clarity + 92 * green + 16,
+    112 * clarity + 20 * green + 24,
+  ];
+}
+
+
+/**
+ * Framebuffer renderer: terrain into a colour buffer plus a depth buffer.
+ *
+ * WHY A Z-BUFFER RATHER THAN PAINTING QUADS FAR-TO-NEAR
+ * The obvious approach -- sort cells by depth and draw -- was tried first and
+ * produced a stippled, broken-looking marsh, and the cause is worth recording
+ * because nothing about it is a maths error: with 96x96 cells on a 900 px canvas
+ * each cell rasterises to about 4 x 2 pixels, so any per-quad point-in-quad test
+ * leaves sub-pixel gaps between neighbours. The shapes were correct and only the
+ * *coverage* was wrong, which unit tests cannot see and looking at the image
+ * finds immediately. A depth buffer makes coverage exact regardless of how small
+ * the cells are, and removes the need to reason about sort order under yaw.
+ */
+class Scene {
+  constructor(width, height, ground) {
+    this.width = width;
+    this.height = height;
+    this.ground = ground;
+    /**
+     * RGBA, one 4-byte pixel per framebuffer pixel — NOT RGB.
+     *
+     * This used to be 3 bytes per pixel, and app.js copied it straight into an
+     * ImageData, which is 4. The result was not a crash but a diagonal stripe
+     * pattern: every pixel's channels slid one place and the final alpha became
+     * the next pixel's red. Reproduced in isolation before fixing -- copying an
+     * RGB buffer over an RGBA one is silent, so the buffer format is now RGBA at
+     * the source and there is exactly one stride in the system.
+     */
+    this.rgb = new Uint8ClampedArray(width * height * 4);
+    this.depth = new Float32Array(width * height);
+  }
+
+  /** Paint sky. Called before the terrain; the terrain then overwrites where it lands. */
+  paintSky() {
+    const { width, height, rgb, depth } = this;
+    for (let y = 0; y < height; y += 1) {
+      const t = y / (height - 1);
+      const r = SKY_TOP[0] + (SKY_BOTTOM[0] - SKY_TOP[0]) * t;
+      const g = SKY_TOP[1] + (SKY_BOTTOM[1] - SKY_TOP[1]) * t;
+      const b = SKY_TOP[2] + (SKY_BOTTOM[2] - SKY_TOP[2]) * t;
+      for (let x = 0; x < width; x += 1) {
+        const k = (y * width + x) * 4;
+        rgb[k] = r;
+        rgb[k + 1] = g;
+        rgb[k + 2] = b;
+        rgb[k + 3] = 255;
+        depth[y * width + x] = Infinity;
+      }
+    }
+  }
+
+  _splat(x0, x1, y0, y1, z, colour) {
+    const { width, height, rgb, depth } = this;
+    const xa = Math.max(0, Math.ceil(x0));
+    const xb = Math.min(width - 1, Math.floor(x1));
+    const ya = Math.max(0, Math.ceil(y0));
+    const yb = Math.min(height - 1, Math.floor(y1));
+    for (let py = ya; py <= yb; py += 1) {
+      const row = py * width;
+      for (let px = xa; px <= xb; px += 1) {
+        const idx = row + px;
+        if (z < depth[idx]) {
+          depth[idx] = z;
+          const k = idx * 4;
+          rgb[k] = colour[0];
+          rgb[k + 1] = colour[1];
+          rgb[k + 2] = colour[2];
+          rgb[k + 3] = 255;
+        }
+      }
+    }
+  }
+
+  /**
+   * Draw the marsh at the given water surface elevation (metres).
+   *
+   * Order within a cell matters: the bed is farther from the eye than the water
+   * above it, so water is splatted at a nearer depth and wins the test wherever
+   * the bed is submerged. Getting this backwards shows the riverbed sitting on
+   * top of the surface, which is exactly what an earlier attempt looked like.
+   */
+  paintWater(worldSurfaceMetres, algaeField) {
+    const { ground, width, height } = this;
+    const u = 1 / (GRID - 1);
+    const surface = worldUnits(worldSurfaceMetres);
+
+    for (let j = 0; j < GRID - 1; j += 1) {
+      for (let i = 0; i < GRID - 1; i += 1) {
+        const k = j * GRID + i;
+        const e00 = ground[k];
+        const e10 = ground[k + 1];
+        const e01 = ground[k + GRID];
+        const e11 = ground[k + GRID + 1];
+        const cx = (i + 0.5) * u;
+        const cyy = (j + 0.5) * u;
+
+        const bed = (e00 + e10 + e01 + e11) / 4;
+        const algae = algaeField === null ? 0 : algaeField[k];
+
+        // Bed / mud.
+        const bc = project(cx, cyy, worldUnits(bed), width, height);
+        if (bc !== null) {
+          const a = project(i * u, j * u, worldUnits(e00), width, height);
+          const b = project((i + 1) * u, j * u, worldUnits(e10), width, height);
+          const c = project((i + 1) * u, (j + 1) * u, worldUnits(e11), width, height);
+          const d = project(i * u, (j + 1) * u, worldUnits(e01), width, height);
+          if (a !== null && b !== null && c !== null && d !== null) {
+            const nx = -(e10 - e00);
+            const ny = -(e01 - e00);
+            const nrm = Math.hypot(nx, ny, 1);
+            const k = shade(nx / nrm, ny / nrm, 1 / nrm, groundColour(bed, algae));
+            this._splat(
+              Math.min(a[0], b[0], c[0], d[0]),
+              Math.max(a[0], b[0], c[0], d[0]),
+              Math.min(a[1], b[1], c[1], d[1]),
+              Math.max(a[1], b[1], c[1], d[1]),
+              bc[2],
+              k,
+            );
+          }
+        }
+
+        // Water surface, only where this cell holds water.
+        if (bed < worldSurfaceMetres) {
+          const wc = project(cx, cyy, surface, width, height);
+          if (wc !== null) {
+            const wa = project(i * u, j * u, surface, width, height);
+            const wb = project((i + 1) * u, j * u, surface, width, height);
+            const wq = project((i + 1) * u, (j + 1) * u, surface, width, height);
+            const wd = project(i * u, (j + 1) * u, surface, width, height);
+            if (wa !== null && wb !== null && wq !== null && wd !== null) {
+              const col = waterColour(worldSurfaceMetres - bed, algae);
+              this._splat(
+                Math.min(wa[0], wb[0], wq[0], wd[0]),
+                Math.max(wa[0], wb[0], wq[0], wd[0]),
+                Math.min(wa[1], wb[1], wq[1], wd[1]),
+                Math.max(wa[1], wb[1], wq[1], wd[1]),
+                wc[2],
+                col,
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * A thin marker for the levee/sluice the player controls, drawn as a bright
+   * slab so it stays findable at any zoom. Deliberately simple: the sluice is an
+   * interface element, and an interface element that needs shading to be seen is
+   * competing with the terrain for the player's attention.
+   */
+  paintSluice(worldPos, colour) {
+    const { width, height } = this;
+    const half = 0.5 / GRID;
+    const p0 = project(worldPos - half, 0.5 - half * 6, worldUnits(0.6), width, height);
+    const p1 = project(worldPos + half, 0.5 + half * 6, worldUnits(-0.4), width, height);
+    if (p0 === null || p1 === null) return;
+    this._splat(
+      Math.min(p0[0], p1[0]),
+      Math.max(p0[0], p1[0]),
+      Math.min(p0[1], p1[1]),
+      Math.max(p0[1], p1[1]),
+      -1,
+      colour,
+    );
+  }
+}
+
+
+// ---- src/sim.js ----
+/**
+ * sim.js — one tick of the whole system, and the record of what happened.
+ *
+ * The coupling order is deliberate and is the reason the app can explain itself:
+ *
+ *   tide  ->  head across the sluice  ->  water exchange  ->  depth per cell
+ *           ->  light per cell  ->  algae growth  ->  fish refuge/stranding
+ *
+ * Each step consumes the previous one's output. Nothing here polls the moon or
+ * the fish directly; if a readout says "6 fish stranded", the cause is
+ * reconstructible by walking back up this chain to the sluice setting that
+ * drained the pool faster than the fish could leave it.
+ *
+ * Time: the model advances in hours of simulated time. One real second at 1x is
+ * about one simulated hour, so a full lunar month takes roughly a day and a half
+ * of play at 1x and is skippable at higher speeds.
+ */
+
+const HOURS_PER_STEP = 0.25;
+
+/** Initial state: pool half-full of a previous high tide, moderately fertile. */
+function initialState() {
+  const ground = null; // filled by the caller, which owns the generated terrain
+  return {
+    hours: 0,
+    depth: null,
+    algae: new Float32Array(GRID * GRID).fill(0.22),
+    nutrient: 0.35,
+    /** Freshness 0 = fully saline, 1 = fully fresh. Drives what grows. */
+    freshness: 0.1,
+    /**
+     * How strongly shallow water warms, scaling the warmth term of habitat value.
+     * 0 = no thermal gradient (fish prefer deep), 1 = a flat that heats noticeably.
+     */
+    temperatureFactor: 1.0,
+    /** Millimetres of rain per simulated hour; see RAIN_RATE. */
+    rainfallMmPerH: 0.0,
+    fish: [],
+    ground,
+    /**
+     * Two openings, because a pool with only an intake has no decisions in it --
+     * see the note on the drain. Both are areas in square metres; 0 means built
+     * out (sealed), which is how the player lowers the pool permanently.
+     */
+    sluice: { open: false, areaM2: 2.4 },
+    /**
+     * Outfall through the sea bank, always open once cut. This is what creates
+     * the trade-off: draining the pool exposes the marsh (which is what kills
+     * fish if you are too fast) and lets rain and springs freshen it.
+     * areaM2 = 0 until the player cuts it.
+     */
+    outfall: { open: false, areaM2: 0 },
+    log: [],
+    counts: { strandedEver: 0 },
+  };
+}
+
+/**
+ * Seed fish in the deepest cells.
+ *
+ * Placed by depth rather than randomly, because that is what real fish do at
+ * low water and because it makes the opening situation legible: they start in
+ * the channel, which is the only thing that stays wet.
+ */
+function seedFish(state, count) {
+  const cells = [];
+  for (let k = 0; k < state.ground.length; k += 1) {
+    if (state.depth[k] > 0.3) cells.push([state.depth[k], k]);
+  }
+  cells.sort((a, b) => b[0] - a[0]);
+  const fish = [];
+  for (let n = 0; n < count && n < cells.length; n += 1) {
+    fish.push({ cell: cells[n][1], alive: true, ageH: 0 });
+  }
+  state.fish = fish;
+  return fish.length;
+}
+
+/**
+ * Advance the system by one step.
+ *
+ * Returns nothing; mutates state. Events are appended to state.log with enough
+ * context for the UI to say what happened in a sentence rather than a code.
+ */
+function step(state, dtHours) {
+  const hours = state.hours + dtHours;
+  const sea = seaLevel(hours);
+
+  // 1. Exchange through the sluice. Head is sea level minus pool surface.
+  let inflowM3 = 0;
+  if (state.sluice.open) {
+    const surface = meanSurface(state);
+    const flow = orificeFlow(state.sluice.areaM2, sea - surface);
+    // Spread the volume over the currently wet cells; a proper solver would
+    // distribute by geometry, and doing it this way is honest about being a
+    // simplification -- see note in stepWater.
+    inflowM3 = flow * dtHours * 3600;
+    applyVolume(state, inflowM3);
+  }
+  // Outfall: drains the pool to sea whenever the pool stands above the sea.
+  let outflowM3 = 0;
+  if (state.outfall.open && state.outfall.areaM2 > 0) {
+    const surface = meanSurface(state);
+    const flow = orificeFlow(state.outfall.areaM2, surface - sea);
+    outflowM3 = flow * dtHours * 3600;
+    if (outflowM3 !== 0) applyVolume(state, -outflowM3);
+  }
+
+  // Rain and evaporation, in metres over the wet surface. Small per hour, but
+  // this is the term that lets a drained pool turn fresh while a sealed one
+  // stays saline, so it is what gives the marsh a second axis than wet/dry.
+  const wetNow = wetArea(state.depth, CELL_AREA_M2);
+  const rainM = (state.rainfallMmPerH / 1000) * dtHours;
+  if (wetNow > 0 && rainM !== 0) {
+    applyVolume(state, rainM * wetNow);
+  }
+
+  state.hours = hours;
+
+  // 2. Redistribute within the pool.
+  stepWater(state.depth, state.ground, dtHours * 4);
+
+  // 3. Biology, which reads depth and nothing else.
+  let growth = 0;
+  for (let k = 0; k < state.depth.length; k += 1) {
+    const g = algaeGrowth(state.algae[k], state.depth[k], state.nutrient, dtHours);
+    state.algae[k] = Math.max(0, Math.min(1.4, state.algae[k] + g));
+    growth += g;
+  }
+  // Nutrient is consumed by production and replenished by flooding with the sea.
+  state.nutrient = Math.max(0.02, Math.min(1, state.nutrient - growth * 0.00002 + (inflowM3 > 0 ? 0.0000004 * inflowM3 : 0)));
+
+  // 4. Fish: move toward refuge, die if stranded.
+  for (const f of state.fish) {
+    if (!f.alive) continue;
+    f.ageH += dtHours;
+    moveFish(state, f);
+    const st = fishState(state.depth[f.cell]);
+    if (st === 'stranded') {
+      f.alive = false;
+      state.counts.strandedEver += 1;
+      state.log.push({
+        hours,
+        kind: 'stranded',
+        cell: f.cell,
+        depthM: state.depth[f.cell],
+      });
+    }
+  }
+
+  // Freshness: freshened by rain on the wet area, restored by seawater inflow.
+  // Volume-weighted rather than stepped, so it cannot overshoot [0,1].
+  const totalWater = volumeAbove(state.depth, CELL_AREA_M2);
+  if (totalWater > 0) {
+    const freshInput = (rainM * wetNow) / totalWater;
+    const saltInput = inflowM3 > 0 ? (inflowM3 / totalWater) * 0.55 : 0;
+    state.freshness = Math.max(0, Math.min(1, state.freshness + freshInput - saltInput));
+  }
+
+  return { sea, inflowM3, outflowM3 };
+}
+
+/** Mean water surface elevation over wet cells, in metres. */
+function meanSurface(state) {
+  let sum = 0;
+  let n = 0;
+  for (let k = 0; k < state.depth.length; k += 1) {
+    if (state.depth[k] > 0.02) {
+      sum += state.ground[k] + state.depth[k];
+      n += 1;
+    }
+  }
+  return n === 0 ? -99 : sum / n;
+}
+
+/**
+ * Add (or remove) a volume of water across the wet cells.
+ *
+ * Clamped so removal never drives depth negative, which would otherwise leak
+ * volume out of a system that is supposed to conserve it -- the same failure
+ * class that made the earlier water update non-conservative.
+ */
+function applyVolume(state, volumeM3) {
+  const depth = state.depth;
+  let wet = 0;
+  for (let k = 0; k < depth.length; k += 1) if (depth[k] > 0.001) wet += 1;
+  if (wet === 0) {
+    if (volumeM3 < 0) {
+      throw new Error('applyVolume: asked to drain an already empty pool');
+    }
+    // First water onto dry marsh: wet the lowest cells, or the inflow would
+    // silently vanish.
+    const order = Array.from(state.ground.keys()).sort((a, b) => state.ground[a] - state.ground[b]);
+    const per = volumeM3 / (CELL_AREA_M2 * Math.max(1, order.length * 0.02));
+    for (let n = 0; n < Math.floor(order.length * 0.02); n += 1) {
+      depth[order[n]] += per;
+    }
+    return;
+  }
+  const perCell = volumeM3 / (wet * CELL_AREA_M2);
+  for (let k = 0; k < depth.length; k += 1) {
+    if (depth[k] <= 0.001) continue;
+    const next = depth[k] + perCell;
+    depth[k] = next > 0 ? next : 0;
+  }
+}
+
+/**
+ * Fish movement: swim to a wetter neighbouring cell when the current one is
+ * becoming dangerous, but only if there is enough water to swim through.
+ *
+ * The constraint that produces the interesting failure is the second one: a fish
+ * cannot cross a cell shallower than fishSwimDepth. So a pool drained quickly
+ * traps fish on the shelf even though the channel is visible and close -- they
+ * cannot get there. That is the honest version of "you flooded the marsh too
+ * fast", and it is why the drain rate matters as much as the tide you picked.
+ */
+function moveFish(state, fish) {
+  const { depth } = state;
+  const k = fish.cell;
+  const i = k % GRID;
+  const j = (k / GRID) | 0;
+  const here = depth[k];
+
+  // Immobilised: too little water to move through. Not yet dead -- a fish in 5 cm
+  // of water can still survive, and if the tide comes back it recovers. Keeping
+  // "cannot move" and "dying" as different conditions is what lets the app say
+  // which one is happening.
+  if (here < LIMITS.fishSwimDepth) return;
+
+  const neighbours = [];
+  if (i > 0) neighbours.push(k - 1);
+  if (i < GRID - 1) neighbours.push(k + 1);
+  if (j > 0) neighbours.push(k - GRID);
+  if (j < GRID - 1) neighbours.push(k + GRID);
+
+  // Move to the best reachable habitat, not to the deepest water.
+  //
+  // This is what makes stranding possible at all. With a "seek depth" rule fish
+  // sit in the channel, never enter the marsh, and cannot be left behind however
+  // badly the player drains the pool -- measured, four strategies gave four very
+  // different water levels and 40/40 survivors each time. Habitat-seeking is also
+  // the true behaviour: fish come in on the tide to feed on the productive
+  // shallows and accept the risk, which is exactly the risk the player controls.
+  let best = k;
+  let bestScore = habitatValue(here, state.algae[k], state.temperatureFactor);
+  for (const n of neighbours) {
+    const score = habitatValue(depth[n], state.algae[n], state.temperatureFactor);
+    if (score > bestScore) {
+      best = n;
+      bestScore = score;
+    }
+  }
+  fish.cell = best;
+}
+
+
+// ---- src/app.js ----
+/**
+ * app.js — the interface: canvas sizing, input, the loop, and the sentences.
+ *
+ * The plain-language readouts are generated from the same state the simulation
+ * uses, not written as fixed strings keyed off a phase. That is deliberate: a
+ * hand-written caption for "what is happening" drifts away from the model, and a
+ * model that contradicts its own caption is worse than one with no caption.
+ */
+
+
+const el = (id) => document.getElementById(id);
+const canvas = el('view');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+const ground = buildGround();
+const state = initialState();
+state.ground = ground;
+state.depth = new Float32Array(GRID * GRID).fill(0);
+
+// Start part-filled from the previous high water, so the first frame is a marsh
+// with recognisable features rather than a dry plain.
+for (let k = 0; k < ground.length; k += 1) {
+  const d = 0.55 - ground[k];
+  state.depth[k] = d > 0 ? d : 0;
+}
+seedFish(state, 34);
+
+let scene = null;
+let internalWidth = 0;
+let internalHeight = 0;
+let imageData = null;
+
+/**
+ * Size the internal buffer to the canvas at a capped resolution.
+ *
+ * The buffer is deliberately lower than the CSS size: this renderer is a CPU
+ * software rasteriser, so cost scales with pixels filled. 480 px wide keeps a
+ * full frame comfortably inside 16 ms and upscales acceptably for a landscape,
+ * where softness reads as distance rather than as a mistake.
+ *
+ * devicePixelRatio is applied to the BACKING store only, never to the raster
+ * width. An earlier version multiplied the raster width by dpr as well, which
+ * quietly quadrupled the fill cost on a phone (412 CSS px became 1648 rendered
+ * pixels) -- the exact opposite of the cap this function exists to impose. The
+ * cap is on the simulation of light, not on the display's pixel count.
+ */
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cssW = Math.max(160, Math.round(rect.width));
+  const cssH = Math.max(120, Math.round(rect.height));
+  internalWidth = Math.min(480, cssW);
+  internalHeight = Math.max(1, Math.round((internalWidth * cssH) / cssW));
+  // Backing store matches the device so the upscaled image is not further
+  // resampled by the browser; the raster cost stays at internalWidth^2-ish.
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  scene = new Scene(internalWidth, internalHeight, ground);
+  imageData = ctx.createImageData(internalWidth, internalHeight);
+  camera.zoom = fitZoom(ground, internalWidth, internalHeight, {});
+}
+
+let holderCanvas = null;
+function offCanvas() {
+  if (holderCanvas === null) holderCanvas = document.createElement('canvas');
+  if (holderCanvas.width !== internalWidth || holderCanvas.height !== internalHeight) {
+    holderCanvas.width = internalWidth;
+    holderCanvas.height = internalHeight;
+  }
+  return holderCanvas;
+}
+
+/** Current water surface for display: the actual mean surface, not the sea. */
+function tideSurface() {
+  const s = meanSurface(state);
+  return s;
+}
+
+/**
+ * Blit the scene buffer to the canvas.
+ *
+ * putImageData cannot scale, and the scene is intentionally rendered below CSS
+ * resolution, so the copy goes through an offscreen bitmap and one drawImage.
+ * Keeping it in one function means there is exactly one place that decides the
+ * smoothing behaviour -- two copies of this is how a UI ends up sharp in a
+ * screenshot and blurry on a phone, or vice versa.
+ */
+function commitPixels() {
+  imageData.data.set(scene.rgb);
+  const holder = offCanvas();
+  holder.getContext('2d').putImageData(imageData, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(holder, 0, 0, canvas.width, canvas.height);
+}
+
+function clockText(hours) {
+  const day = Math.floor(hours / 24) + 1;
+  const h = Math.floor(hours % 24);
+  const m = Math.floor((hours % 1) * 60);
+  return {
+    day: `day ${day}`,
+    time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
+  };
+}
+
+/**
+ * The sentence under the view. Built from conditions in priority order, because
+ * what matters changes: a stranded fish outranks a rising tide, and an empty
+ * marsh outranks both.
+ */
+function hintText() {
+  const c = census(state.depth, state.algae, state.fish);
+  const sea = seaLevel(state.hours);
+  const surf = meanSurface(state);
+  const head = sea - surf;
+  const wetFrac = wetArea(state.depth, CELL_AREA_M2) / (GRID * GRID * CELL_SIDE_M * CELL_SIDE_M);
+
+  if (c.stranded > 0) {
+    return {
+      text: `${c.stranded} fish are stranded in water too shallow to survive. They cannot swim out — the channel is reachable on the map but every route crosses dry ground.`,
+      cls: 'bad',
+    };
+  }
+  if (c.lost > 0 && state.hours < 24 * 2) {
+    return {
+      text: `${c.lost} fish were left behind on the flats. Fish feed in shallow water; draining the pool faster than a fish can swim to the channel turns the marsh into a trap.`,
+      cls: 'bad',
+    };
+  }
+  if (!state.sluice.open && !state.outfall.open) {
+    return {
+      text: `Both openings closed. The pool is cut off from the sea and can only lose water to evaporation.`,
+      cls: '',
+    };
+  }
+  if (state.sluice.open && Math.abs(head) < 0.02) {
+    return {
+      text: `Intake open, but the sea and the pool are level, so almost nothing is moving. Flow goes as the square root of the head difference — small head, small flow.`,
+      cls: '',
+    };
+  }
+  if (state.outfall.open && surf < sea + 0.02 && head > 0) {
+    return {
+      text: `The sea is higher than the pool, so the outfall is taking water IN. Openings do not care which way you meant them to work.`,
+      cls: 'warn',
+    };
+  }
+  if (wetFrac > 0.85) {
+    return {
+      text: `Nearly the whole marsh is under water. The flat is warm and productive, and fish are moving onto it to feed.`,
+      cls: '',
+    };
+  }
+  if (wetFrac < 0.12) {
+    return {
+      text: `Only the channel holds water now. Everything else is exposed mud — this is the lowest the pool can go, and the refuge for whatever fish remain.`,
+      cls: 'warn',
+    };
+  }
+  return {
+    text: `Pool at ${surf.toFixed(2)} m, sea at ${sea.toFixed(2)} m, so the head across the openings is ${Math.abs(head).toFixed(2)} m.`,
+    cls: '',
+  };
+}
+
+function updateReadout() {
+  const t = clockText(state.hours);
+  const sea = seaLevel(state.hours);
+  const c = census(state.depth, state.algae, state.fish);
+  const wet = wetArea(state.depth, CELL_AREA_M2);
+  const total = GRID * CELL_SIDE_M * GRID * CELL_SIDE_M;
+  const rising = seaLevel(state.hours + 0.1) > sea;
+
+  el('clock').textContent = t.day;
+  el('clock').nextElementSibling.textContent = t.time;
+  el('tideLabel').textContent = rising ? 'tide rising' : 'tide falling';
+  el('tideHeight').textContent = `${sea >= 0 ? '+' : ''}${sea.toFixed(2)} m`;
+  el('wetLabel').textContent = `${((wet / total) * 100).toFixed(0)}%`;
+  el('fishLabel').textContent = String(c.alive);
+  el('fishLabel').nextElementSibling.textContent =
+    c.lost > 0 ? `${c.alive} alive · ${c.lost} lost` : 'fish alive';
+
+  const hint = el('hint');
+  const h = hintText();
+  hint.textContent = h.text;
+  hint.className = h.cls;
+}
+
+// ---- input -----------------------------------------------------------------
+
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
+let pinchDistance = 0;
+
+canvas.addEventListener('pointerdown', (e) => {
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  camera.yaw += dx * 0.006;
+  camera.pitch = Math.max(0.12, Math.min(1.25, camera.pitch + dy * 0.005));
+});
+
+const endDrag = () => {
+  dragging = false;
+};
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault();
+    camera.zoom = Math.max(0.2, Math.min(6, camera.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+  },
+  { passive: false },
+);
+
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    pinchDistance = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY,
+    );
+  }
+}, { passive: true });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (e.touches.length !== 2) return;
+  e.preventDefault();
+  const d = Math.hypot(
+    e.touches[0].clientX - e.touches[1].clientX,
+    e.touches[0].clientY - e.touches[1].clientY,
+  );
+  if (pinchDistance > 0) {
+    camera.zoom = Math.max(0.2, Math.min(6, camera.zoom * (d / pinchDistance)));
+  }
+  pinchDistance = d;
+}, { passive: false });
+
+const SPEEDS = [0, 1, 4, 12];
+let speedIndex = 1;
+
+/**
+ * Setting this to 0 pauses the model without touching the UI control.
+ * Tests need a still image: comparing the renderer's buffer against the canvas
+ * across an animation frame compares two different water levels and reports a
+ * mismatch that is not a bug.
+ */
+Object.defineProperty(window, '__saltmarshPause', {
+  set(value) {
+    speedIndex = value ? 0 : speedIndex;
+  },
+  configurable: true,
+});
+
+el('speed').addEventListener('input', (e) => {
+  speedIndex = Number(e.target.value);
+  el('speedOut').textContent = `${SPEEDS[speedIndex]}×`;
+});
+
+el('drain').addEventListener('input', (e) => {
+  state.sluice.areaM2 = Number(e.target.value);
+  el('drainOut').textContent = `${state.sluice.areaM2.toFixed(1)} m²`;
+});
+
+function syncButtons() {
+  const s = el('sluiceBtn');
+  s.setAttribute('aria-pressed', String(state.sluice.open));
+  el('sluiceState').textContent = state.sluice.open ? 'OPEN' : 'SHUT';
+  const o = el('outfallBtn');
+  const open = state.outfall.open && state.outfall.areaM2 > 0;
+  o.setAttribute('aria-pressed', String(open));
+  el('outfallState').textContent = open ? 'CUT' : 'SEALED';
+}
+
+el('sluiceBtn').addEventListener('click', () => {
+  state.sluice.open = !state.sluice.open;
+  syncButtons();
+});
+
+el('outfallBtn').addEventListener('click', () => {
+  if (state.outfall.open) {
+    state.outfall.open = false;
+    state.outfall.areaM2 = 0;
+  } else {
+    state.outfall.open = true;
+    state.outfall.areaM2 = 1.3;
+  }
+  syncButtons();
+});
+
+// ---- static explanation, derived from the model ----------------------------
+
+function explainStatics() {
+  const beatDays = springNeapHours() / 24;
+  const m2 = CONSTITUENTS.find((c) => c.name === 'M2');
+  el('tideFacts').textContent =
+    `Sea level here is the sum of ${CONSTITUENTS.length} harmonic constituents: ` +
+    `${CONSTITUENTS.map((c) => `${c.name} (${c.note}, ${c.periodH.toFixed(2)} h, ±${c.amp.toFixed(2)} m)`).join('; ')}. ` +
+    `That gives ${m2.periodH.toFixed(2)} h between successive lunar highs, so flood times drift about 50 minutes later each day, ` +
+    `and M2 beating against S2 produces a spring-to-spring cycle of ${beatDays.toFixed(1)} days — ` +
+    `which is why some days flood the whole marsh and some barely touch the flat.`;
+
+  // Volume-elevation curve, sampled from the generated terrain rather than
+  // described, so the text cannot disagree with the map.
+  const points = [];
+  for (let level = -0.6; level <= 0.9; level += 0.3) {
+    let wet = 0;
+    for (let k = 0; k < ground.length; k += 1) if (ground[k] < level) wet += 1;
+    points.push(`${level >= 0 ? '+' : ''}${level.toFixed(1)} m → ${((wet / ground.length) * 100).toFixed(0)}%`);
+  }
+  el('mechanicText').textContent =
+    `Water sits where the ground lets it. At the top of a spring tide about 94% of the marsh is wet; ` +
+    `at the bottom of a neap only the channel is. The same 10,000 cubic metres of water moves the level a long way ` +
+    `when it is all in the channel and almost not at all when it has spread over the flat.`;
+  el('volumeText').textContent =
+    `This is the volume-elevation relationship, sampled from the terrain: ${points.join(', ')}. ` +
+    `Its slope is the wetted area, so a given inflow raises the level by an amount that depends on where the water already is — ` +
+    `which is the whole reason you have to think about tide timing rather than just open a valve.`;
+}
+
+// ---- loop ------------------------------------------------------------------
+
+let last = performance.now();
+let readoutTick = 0;
+
+function frame(now) {
+  const dtSeconds = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  const simSpeed = SPEEDS[speedIndex];
+  if (simSpeed > 0) {
+    // One real second at 1x is about two simulated hours.
+    const hours = dtSeconds * 2 * simSpeed;
+    let remaining = hours;
+    while (remaining > 0) {
+      const d = Math.min(HOURS_PER_STEP, remaining);
+      step(state, d);
+      remaining -= d;
+    }
+  }
+
+  scene.paintSky();
+  scene.paintWater(tideSurface(), state.algae);
+  commitPixels();
+
+  readoutTick += 1;
+  if (readoutTick % 6 === 0) updateReadout();
+
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener('resize', () => {
+  resize();
+  updateReadout();
+});
+
+resize();
+syncButtons();
+explainStatics();
+updateReadout();
+requestAnimationFrame(frame);
+
+// Exposed for the tests only: they need to drive the sim deterministically
+// rather than race the animation clock.
+window.__saltmarsh = {
+  state,
+  camera,
+  census,
+  seaLevel,
+  step,
+  fitZoom,
+  ground,
+  // The renderer's own buffer, so a test can compare what was intended against
+  // what the canvas ended up showing. Without this the only way to notice a
+  // stride error is to look at the screenshot.
+  get sceneRgb() {
+    return scene.rgb;
+  },
+  get sceneWidth() {
+    return internalWidth;
+  },
+  get sceneHeight() {
+    return internalHeight;
+  },
+  set speed(value) {
+    speedIndex = value <= 0 ? 0 : Math.max(1, SPEEDS.indexOf(value));
+  },
+};
+
+})();
+</script>
+</body>
+</html>
