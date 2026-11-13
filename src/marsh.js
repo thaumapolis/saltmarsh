@@ -48,6 +48,17 @@ export function worldUnits(metres) {
 /** Side length of one cell, in metres. Used for volumes and flow. */
 export const CELL_SIDE_M = MARSH_WIDTH_M / GRID;
 
+/**
+ * Area of one cell in square metres.
+ *
+ * Defined here, once, because it is a property of the grid. Both the simulator
+ * and the interface need it, and having each compute its own is how a physical
+ * constant ends up with two values: the bundler's top-level collision check
+ * caught exactly this (`CELL_AREA_M2` declared in sim.js and app.js), which
+ * would have been invisible as separate ES modules.
+ */
+export const CELL_AREA_M2 = CELL_SIDE_M * CELL_SIDE_M;
+
 
 export function index(i, j) {
   return j * GRID + i;

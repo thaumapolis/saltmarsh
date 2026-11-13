@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Saltmarsh — run a tidal pool</title>
+<style>/* __SALTMARSH_CSS__ */</style>
+</head>
+<body>
+<div id="app">
+  <header id="masthead">
+    <h1>Saltmarsh</h1>
+    <p class="lede">A tidal pool you manage. The moon decides when water is available; you decide when it comes in and goes out.</p>
+  </header>
+
+  <div id="stage">
+    <canvas id="view" aria-label="Three-dimensional view of the marsh at the current tide level"></canvas>
+
+    <div id="readout" aria-live="polite">
+      <div class="stat"><b id="clock">day 1</b><span>06:00</span></div>
+      <div class="stat"><b id="tideLabel">rising</b><span id="tideHeight">+0.00 m</span></div>
+      <div class="stat"><b id="wetLabel">0%</b><span>marsh flooded</span></div>
+      <div class="stat"><b id="fishLabel">0</b><span>fish alive</span></div>
+    </div>
+
+    <div id="hint" role="status"></div>
+  </div>
+
+  <section id="controls" aria-label="Sluice controls">
+    <div class="control">
+      <button id="sluiceBtn" class="big" type="button">
+        <span class="k">INTAKE</span><span class="v" id="sluiceState">SHUT</span>
+      </button>
+      <p class="expl" id="sluiceExpl">Opens the sea sluice. Water flows in only when the sea stands above the pool.</p>
+    </div>
+    <div class="control">
+      <button id="outfallBtn" class="big" type="button">
+        <span class="k">OUTFALL</span><span class="v" id="outfallState">SEALED</span>
+      </button>
+      <p class="expl" id="outfallExpl">Cut the outfall and the pool drains toward the sea on every low water.</p>
+    </div>
+    <div class="control sliders">
+      <label for="speed">Speed <output id="speedOut">1&times;</output></label>
+      <input id="speed" type="range" min="0" max="3" step="1" value="1" aria-label="Simulation speed">
+      <label for="drain">Intake size <output id="drainOut">2.4 m&sup2;</output></label>
+      <input id="drain" type="range" min="0.3" max="6" step="0.1" value="2.4" aria-label="Intake opening area">
+    </div>
+  </section>
+
+  <section id="explain" aria-label="What you are looking at">
+    <h2>What you are looking at</h2>
+    <p>The ground is a marsh cross-section: a deep channel, a broad flat, and banks. The coloured surface is water. <b>Vertical height is exaggerated about 22&times;</b> — real relief here is 0.5% of the width and would look flat.</p>
+    <p id="mechanicText"></p>
+    <h2>What you can do</h2>
+    <ul>
+      <li>Toggle <b>INTAKE</b> and <b>OUTFALL</b>. Nothing happens unless there is a head difference, so timing matters more than the buttons.</li>
+      <li><b>Drag</b> the view to rotate it, <b>pinch</b> or scroll to zoom.</li>
+      <li>Watch the fish counter. Fish come onto the flats to feed as the tide floods. If you drain the pool faster than they can swim back to the channel, they are stranded in puddles and die.</li>
+    </ul>
+    <h2>Why it behaves like this</h2>
+    <p id="volumeText"></p>
+    <details>
+      <summary>The numbers behind the tides</summary>
+      <p id="tideFacts"></p>
+    </details>
+  </section>
+
+  <footer>
+    <p>One file, no network, no storage. The simulation is a 96&times;96 grid advanced by shallow-water exchange; the view is drawn on the CPU because there is no GPU path here.</p>
+  </footer>
+</div>
+<script>
+/* __SALTMARSH_JS__ */
+</script>
+</body>
+</html>

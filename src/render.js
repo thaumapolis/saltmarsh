@@ -51,8 +51,8 @@ export const camera = {
   zExaggeration: 22,
 };
 
-const SKY_TOP = [11, 19, 33];
-const SKY_BOTTOM = [52, 76, 92];
+export const SKY_TOP = [11, 19, 33];
+export const SKY_BOTTOM = [52, 76, 92];
 
 /**
  * Project a world point to the canvas.
@@ -214,7 +214,6 @@ export function waterColour(depthM, algae) {
   ];
 }
 
-export { SKY_TOP, SKY_BOTTOM };
 
 /**
  * Framebuffer renderer: terrain into a colour buffer plus a depth buffer.
@@ -234,7 +233,17 @@ export class Scene {
     this.width = width;
     this.height = height;
     this.ground = ground;
-    this.rgb = new Uint8ClampedArray(width * height * 3);
+    /**
+     * RGBA, one 4-byte pixel per framebuffer pixel — NOT RGB.
+     *
+     * This used to be 3 bytes per pixel, and app.js copied it straight into an
+     * ImageData, which is 4. The result was not a crash but a diagonal stripe
+     * pattern: every pixel's channels slid one place and the final alpha became
+     * the next pixel's red. Reproduced in isolation before fixing -- copying an
+     * RGB buffer over an RGBA one is silent, so the buffer format is now RGBA at
+     * the source and there is exactly one stride in the system.
+     */
+    this.rgb = new Uint8ClampedArray(width * height * 4);
     this.depth = new Float32Array(width * height);
   }
 
@@ -247,10 +256,11 @@ export class Scene {
       const g = SKY_TOP[1] + (SKY_BOTTOM[1] - SKY_TOP[1]) * t;
       const b = SKY_TOP[2] + (SKY_BOTTOM[2] - SKY_TOP[2]) * t;
       for (let x = 0; x < width; x += 1) {
-        const k = (y * width + x) * 3;
+        const k = (y * width + x) * 4;
         rgb[k] = r;
         rgb[k + 1] = g;
         rgb[k + 2] = b;
+        rgb[k + 3] = 255;
         depth[y * width + x] = Infinity;
       }
     }
@@ -268,10 +278,11 @@ export class Scene {
         const idx = row + px;
         if (z < depth[idx]) {
           depth[idx] = z;
-          const k = idx * 3;
+          const k = idx * 4;
           rgb[k] = colour[0];
           rgb[k + 1] = colour[1];
           rgb[k + 2] = colour[2];
+          rgb[k + 3] = 255;
         }
       }
     }

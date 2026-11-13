@@ -16,11 +16,10 @@
  * of play at 1x and is skippable at higher speeds.
  */
 import { seaLevel, orificeFlow } from './tide.js';
-import { stepWater, volumeAbove, wetArea, GRID, CELL_SIDE_M } from './marsh.js';
+import { stepWater, volumeAbove, wetArea, GRID, CELL_AREA_M2 } from './marsh.js';
 import { algaeGrowth, fishState, habitatValue, LIMITS } from './life.js';
 
 export const HOURS_PER_STEP = 0.25;
-const CELL_AREA_M2 = CELL_SIDE_M * CELL_SIDE_M;
 
 /** Initial state: pool half-full of a previous high tide, moderately fertile. */
 export function initialState() {
@@ -257,5 +256,3 @@ function moveFish(state, fish) {
   }
   fish.cell = best;
 }
-
-export { wetArea, volumeAbove, CELL_AREA_M2 };
