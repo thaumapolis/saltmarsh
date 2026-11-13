@@ -18,21 +18,40 @@ import { fileURLToPath } from 'node:url';
 
 const MODULES = ['tide.js', 'marsh.js', 'life.js', 'render.js', 'sim.js', 'app.js'];
 
+/** True if the assembled import statement sources a relative ./ module. */
+function fromRelativeModule(statement) {
+  return /^import\s+\{[\s\S]*\}\s*from\s+'\.\/[^']+';?\s*$/.test(statement.replace(/\s+/g, ' '));
+}
+
+/** Index of the line on which the import opened at `start` closes, or -1. */
+function findImportEnd(lines, start) {
+  for (let j = start; j < lines.length; j += 1) {
+    if (/\}\s*from\s+'[^']+';?\s*$/.test(lines[j])) return j;
+  }
+  return -1;
+}
+
 function stripModuleSyntax(source, name) {
   const lines = source.split('\n');
   const kept = [];
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (/^import\s+\{[^}]*\}\s+from '\.\/[^']+';?\s*$/.test(line)) continue;
-    if (/^import\s+\{\s*$/.test(line)) {
-      let closed = -1;
-      for (let j = i + 1; j < lines.length; j += 1) {
-        if (/^\}\s*from '\.\/[^']+';?\s*$/.test(lines[j])) {
-          closed = j;
-          break;
-        }
+    // A relative named import, on one line or wrapped over several. Matching only
+    // `import {` with nothing after it forced every wrapped import into one
+    // spelling and produced a misleading "unsupported import form" error naming
+    // the opening line when the real problem was a trailing comma or an indented
+    // continuation. Scan to the closing `from './x'` wherever it lands.
+    if (/^import\s+\{/.test(line)) {
+      const closed = findImportEnd(lines, i);
+      if (closed === -1) {
+        throw new Error(
+          `${name}: could not find the end of the import starting at line ${i + 1}; ` +
+          `this bundler handles only relative named imports, e.g. import { a, b } from './x.js';`,
+        );
       }
-      if (closed === -1) throw new Error(`${name}: unterminated import starting at line ${i + 1}`);
+      if (!fromRelativeModule(lines.slice(i, closed + 1).join(' '))) {
+        throw new Error(`${name}: import at line ${i + 1} is not from a relative ./ module`);
+      }
       i = closed;
       continue;
     }
