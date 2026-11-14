@@ -123,6 +123,11 @@ html, body {
 #hint.bad { border-left-color: var(--danger); }
 #hint:empty { display: none; }
 
+/* Capture mode: the front-page image is of the marsh, not of a moment's
+   narration. app.js toggles this on <html> so the overlay disappears without
+   any element being removed from the document. */
+html.card-capture [data-card-suppress] { display: none; }
+
 #controls {
   display: grid;
   grid-template-columns: 1fr 1fr;

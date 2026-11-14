@@ -517,6 +517,23 @@ requestAnimationFrame(frame);
 
 // Exposed for the tests only: they need to drive the sim deterministically
 // rather than race the animation clock.
+/**
+ * Hide the overlay chrome so the front-page image is a picture of the marsh.
+ *
+ * The showcase crops this project's README image to 2:1 for its card. When the
+ * source was a whole page, that crop landed on the caption bar and the card
+ * advertised a sentence of narration instead of the simulation. Removing the
+ * overlay for capture -- rather than cropping harder -- is what makes the source
+ * say what the card needs it to say.
+ *
+ * Exposed as a method on the bridge rather than as a URL parameter: the artifact
+ * is one file served from a sandboxed opaque origin, and a query string would be
+ * a second input the rest of the app would have to reason about.
+ */
+function setCardCapture(enabled) {
+  document.documentElement.classList.toggle('card-capture', enabled);
+}
+
 window.__saltmarsh = {
   state,
   camera,
@@ -526,6 +543,7 @@ window.__saltmarsh = {
   fitZoom,
   ground,
   paintView,
+  setCardCapture,
   /**
    * Projection for the tests, taking elevation in METRES and resolving the world
    * scale itself.

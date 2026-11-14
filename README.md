@@ -7,6 +7,11 @@ Run a tidal grazing marsh. The moon decides when water is available; you decide 
 
 ![The marsh at mid-tide: the channel full, the flat half flooded](docs/desktop.png)
 
+`docs/desktop.png` is captured for the showcase's 2:1 card: `#view` forced to
+2.00:1, the caption hidden with `__saltmarsh.setCardCapture(true)`, and the clip
+taken on the canvas rather than the page. Re-capture it after anything that
+changes the view, or the card silently shows stale or cropped-away content.
+
 ## What you are looking at
 
 A marsh cross-section in 3D: a meandering channel scoured below low water, a broad flat, and banks. The coloured surface is water — dark green where it is deep and productive, pale where it is a thin sheet over mud. **Vertical relief is exaggerated about 22×.** The real ratio here is 2.8 m of height across 520 m of width, which is 0.5%: drawn truthfully it would look flat, and a flat picture of a landscape whose entire subject is elevation tells you nothing. The amount is stated rather than hidden on purpose.

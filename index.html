@@ -130,6 +130,11 @@ html, body {
 #hint.bad { border-left-color: var(--danger); }
 #hint:empty { display: none; }
 
+/* Capture mode: the front-page image is of the marsh, not of a moment's
+   narration. app.js toggles this on <html> so the overlay disappears without
+   any element being removed from the document. */
+html.card-capture [data-card-suppress] { display: none; }
+
 #controls {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -268,7 +273,10 @@ footer {
       <div class="stat"><b id="fishLabel">0</b><span>fish alive</span></div>
     </div>
 
-    <div id="hint" role="status"></div>
+    <!-- data-card-suppress: hidden when capturing the front-page image, because a
+         caption about one transient state has no business being part of a
+         permanent picture of the app. See the capture recipe in README.md. -->
+    <div id="hint" role="status" data-card-suppress></div>
   </div>
 
   <section id="controls" aria-label="Sluice controls">
@@ -2576,6 +2584,23 @@ requestAnimationFrame(frame);
 
 // Exposed for the tests only: they need to drive the sim deterministically
 // rather than race the animation clock.
+/**
+ * Hide the overlay chrome so the front-page image is a picture of the marsh.
+ *
+ * The showcase crops this project's README image to 2:1 for its card. When the
+ * source was a whole page, that crop landed on the caption bar and the card
+ * advertised a sentence of narration instead of the simulation. Removing the
+ * overlay for capture -- rather than cropping harder -- is what makes the source
+ * say what the card needs it to say.
+ *
+ * Exposed as a method on the bridge rather than as a URL parameter: the artifact
+ * is one file served from a sandboxed opaque origin, and a query string would be
+ * a second input the rest of the app would have to reason about.
+ */
+function setCardCapture(enabled) {
+  document.documentElement.classList.toggle('card-capture', enabled);
+}
+
 window.__saltmarsh = {
   state,
   camera,
@@ -2585,6 +2610,7 @@ window.__saltmarsh = {
   fitZoom,
   ground,
   paintView,
+  setCardCapture,
   /**
    * Projection for the tests, taking elevation in METRES and resolving the world
    * scale itself.
