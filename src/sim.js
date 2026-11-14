@@ -19,7 +19,7 @@ import { seaLevel, orificeFlow } from './tide.js';
 import { stepWater, volumeAbove, wetArea, GRID, CELL_AREA_M2 } from './marsh.js';
 import { algaeGrowth, fishState, habitatValue, LIMITS,
          seasonIndex, temperatureFactorForSeason, rainfallMmPerHForSeason,
-         YEAR_DAYS } from './life.js';
+         YEAR_DAYS, BREEDING } from './life.js';
 
 export const HOURS_PER_STEP = 0.25;
 
@@ -95,7 +95,12 @@ export function initialState() {
      */
     outfall: { open: false, areaM2: 0 },
     log: [],
-    counts: { strandedEver: 0 },
+    counts: { strandedEver: 0, recruitedEver: 0 },
+    /**
+     * Fractional fish awaiting birth. Recruitment rate is per hour and a step is
+     * 15 minutes, so recruits must accrue between steps rather than be rounded.
+     */
+    breedingCredit: 0,
     /**
      * Hours each cell has been continuously dry, for the erosion rule. Tracked
      * per cell rather than derived, because "how long has this flat been exposed"
@@ -206,8 +211,10 @@ export function step(state, dtHours) {
   // marsh in a dry summer must fall, which is what makes "cut the outfall and let
   // it freshen" a decision with a seasonal cost rather than a free improvement.
   const evapM = evaporationMmPerH(state.season) / 1000 * dtHours;
+  let evaporatedM3 = 0;
   if (wetNow > 0 && evapM > 0) {
-    applyVolume(state, -Math.min(evapM * wetNow, volumeAbove(state.depth, CELL_AREA_M2)));
+    evaporatedM3 = Math.min(evapM * wetNow, volumeAbove(state.depth, CELL_AREA_M2));
+    applyVolume(state, -evaporatedM3);
   }
 
   state.hours = hours;
@@ -222,7 +229,7 @@ export function step(state, dtHours) {
   // 3. Biology, which reads depth and nothing else.
   let growth = 0;
   for (let k = 0; k < state.depth.length; k += 1) {
-    const g = algaeGrowth(state.algae[k], state.depth[k], state.nutrient, dtHours);
+    const g = algaeGrowth(state.algae[k], state.depth[k], state.nutrient, dtHours, state.freshness);
     state.algae[k] = Math.max(0, Math.min(1.4, state.algae[k] + g));
     growth += g;
   }
@@ -247,13 +254,39 @@ export function step(state, dtHours) {
     }
   }
 
-  // Freshness: freshened by rain on the wet area, restored by seawater inflow.
-  // Volume-weighted rather than stepped, so it cannot overshoot [0,1].
+  // 5. Recruitment. A marsh with food on the bed and fish that are not currently
+  // in trouble adds to its stock; one that is drained or barren does not. This is
+  // what makes the population a managed thing rather than a countdown to zero.
+  recruitFish(state, dtHours);
+
+  // Salt balance, tracked as freshness (0 = full seawater, 1 = fresh).
+  //
+  // Three terms, and the third one is the one that was missing: rain dilutes,
+  // admitted seawater salts, and **evaporation concentrates**. Evaporation removes
+  // water and leaves its salt behind, so it must push freshness *down*. Without
+  // that term a sealed marsh freshened itself to 1.00 and stayed there -- pure
+  // freshwater in a marsh whose bed is under tidal influence, which is backwards,
+  // and it removed the only mechanism that keeps a cut-off marsh from becoming a
+  // pond. Now a sealed marsh freshens in a wet winter and re-salinises as a dry
+  // summer evaporates the pool, which is what managed grazing marshs do.
+  //
+  // Volume-weighted throughout, and the salt pool is tracked by its implied mass
+  // rather than by stepping the fraction, so the result cannot leave [0,1].
   const totalWater = volumeAbove(state.depth, CELL_AREA_M2);
   if (totalWater > 0) {
-    const freshInput = (rainM * wetNow) / totalWater;
-    const saltInput = inflowM3 > 0 ? (inflowM3 / totalWater) * 0.55 : 0;
-    state.freshness = Math.max(0, Math.min(1, state.freshness + freshInput - saltInput));
+    // Freshness is the fraction of the water that is not seawater, so it is the
+    // freshwater volume over the total. Rain adds freshwater volume; seawater
+    // inflow adds salt volume and no freshwater; evaporation removes freshwater
+    // and salt together in the ratio already present.
+    const freshVolume = state.freshness * totalWater;
+    const rainFresh = rainM * wetNow;
+    // Evaporation removes water in proportion to what is there, but the salt
+    // stays: remove the freshwater share only up to the water actually lost, and
+    // charge the remainder against freshwater, which is what concentrating means.
+    const evapFreshRemoved = Math.min(evaporatedM3, freshVolume);
+    const nextFresh = freshVolume + rainFresh - evapFreshRemoved;
+    const nextTotal = Math.max(totalWater + rainM * wetNow + inflowM3 - evaporatedM3, 1e-6);
+    state.freshness = Math.max(0, Math.min(1, nextFresh / nextTotal));
   }
 
   return { sea, inflowM3, outflowM3 };
@@ -329,6 +362,56 @@ export function stepSediment(state, dtHours) {
       }
     }
   }
+}
+
+/**
+ * Add new fish to the stock, by placing them where the marsh currently breeds.
+ *
+ * Recruitment is drawn from the same habitat field the fish themselves use, so
+ * young appear on the productive flats rather than being teleported into a
+ * convenient cell. Nothing is created if the marsh cannot support it: the cap is
+ * a carrying capacity, and the food gate means a barren or drained marsh simply
+ * does not recruit. Both gates are checked against the state rather than assumed,
+ * so the readout cannot claim a breeding season the model did not have.
+ */
+export function recruitFish(state, dtHours) {
+  const alive = state.fish.filter((f) => f.alive);
+  if (alive.length === 0 || alive.length >= BREEDING.carryingCapacity) return 0;
+
+  let foodCells = 0;
+  let best = -1;
+  let bestScore = 0;
+  for (let k = 0; k < state.depth.length; k += 1) {
+    if (state.depth[k] <= LIMITS.fishSwimDepth) continue;
+    if (state.algae[k] < BREEDING.minFoodPerCell) continue;
+    foodCells += 1;
+    const score = habitatValue(state.depth[k], state.algae[k], state.temperatureFactor);
+    if (score > bestScore) {
+      bestScore = score;
+      best = k;
+    }
+  }
+  if (best < 0 || foodCells < 20) return 0;
+
+  // Fractional accumulation: a single step is far too short to produce a whole
+  // fish, so recruits accrue until they add up. Keeping the remainder on the
+  // state rather than rounding means the rate is the rate regardless of step size.
+  const headroom = 1 - alive.length / BREEDING.carryingCapacity;
+  state.breedingCredit =
+    (state.breedingCredit || 0) +
+    BREEDING.ratePerHour * dtHours * alive.length * headroom;
+
+  let added = 0;
+  while (state.breedingCredit >= 1 && state.fish.filter((f) => f.alive).length < BREEDING.carryingCapacity) {
+    state.breedingCredit -= 1;
+    state.fish.push({ cell: best, alive: true, ageH: 0 });
+    added += 1;
+  }
+  if (added > 0) {
+    state.counts.recruitedEver += added;
+    state.log.push({ hours: state.hours, kind: 'recruited', count: added, cell: best });
+  }
+  return added;
 }
 
 /** Mean water surface elevation over wet cells, in metres. */

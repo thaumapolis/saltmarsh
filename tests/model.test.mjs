@@ -13,8 +13,8 @@ import { buildGround, GRID, CELL_AREA_M2, worldUnits, volumeAbove, stepWater } f
 import { seaLevel, springNeapHours, orificeFlow } from '../src/tide.js';
 import { algaeGrowth, fishState, habitatValue, LIMITS,
          dayOfYear, seasonIndex, temperatureFactorForSeason, rainfallMmPerHForSeason,
-         calendar, YEAR_DAYS } from '../src/life.js';
-import { initialState, seedFish, step, meanSurface } from '../src/sim.js';
+         calendar, YEAR_DAYS, freshnessFactor, FRESHNESS, BREEDING } from '../src/life.js';
+import { initialState, seedFish, step, meanSurface, recruitFish, evaporationMmPerH } from '../src/sim.js';
 
 let failures = 0;
 let checks = 0;
@@ -324,6 +324,117 @@ console.log('sediment');
   ok(everNegative, 'a marsh drained for six months loses elevation');
   ok(Array.from(g.depth).every((d) => Number.isFinite(d) && d >= 0),
     'long-horizon sediment change keeps the depth field finite and non-negative');
+}
+
+console.log('productivity and salt');
+{
+  // Freshness must change an outcome. It was computed for a long time and read by
+  // nothing, which made the rain and outfall terms decoration.
+  const wet = 0.1;
+  const atOptimum = algaeGrowth(0.5, wet, 0.6, 1, FRESHNESS.optimum);
+  const atSea = algaeGrowth(0.5, wet, 0.6, 1, 0);
+  const atFresh = algaeGrowth(0.5, wet, 0.6, 1, 1);
+  ok(atOptimum > atSea && atOptimum > atFresh,
+    'algal growth peaks in brackish water, not in the sea or in fresh',
+    `opt ${atOptimum.toFixed(4)} sea ${atSea.toFixed(4)} fresh ${atFresh.toFixed(4)}`);
+  ok(freshnessFactor(FRESHNESS.optimum) > 0.99, 'the factor is 1 at the optimum');
+  ok(freshnessFactor(0.5) < 1 && freshnessFactor(0.5) > 0.5,
+    'the factor is a mild penalty away from the optimum, not an off switch',
+    freshnessFactor(0.5).toFixed(3));
+  // Freshening cannot create growth in the dark: it scales the light-limited rate.
+  const darkBrackish = algaeGrowth(0.5, 30, 1, 1, FRESHNESS.optimum);
+  const darkSea = algaeGrowth(0.5, 30, 1, 1, 0);
+  ok(darkBrackish < 0 && darkSea < 0,
+    'deep dark water loses algae whatever the freshness', `${darkBrackish.toFixed(5)} ${darkSea.toFixed(5)}`);
+
+  // Evaporation must concentrate salt: water leaves, salt stays, so a sealed
+  // pool freshens in wet weather and re-salinises as it evaporates. Without this
+  // the model freshened to 1.00 and stayed there, i.e. a pond.
+  const before = freshState({ fill: -0.2, fish: 0, outfallArea: 0 });
+  before.freshness = 0.6;
+  let minFresh = 0.6;
+  for (let n = 0; n < 24 * 4 * 200; n += 1) {
+    step(before, 0.25);
+    minFresh = Math.min(minFresh, before.freshness);
+  }
+  ok(before.freshness >= 0 && before.freshness <= 1,
+    'freshness stays in [0,1] over 200 days of rain and evaporation', before.freshness.toFixed(3));
+  ok(minFresh < 0.6,
+    'evaporation re-salinises a sealed pool rather than only diluting it',
+    `started 0.600, reached ${minFresh.toFixed(3)}, ended ${before.freshness.toFixed(3)}`);
+}
+
+console.log('recruitment');
+{
+  // Without recruitment the population could only shrink: measured over three
+  // years every strategy lost all 34 fish and finished at zero, so the long
+  // horizon added nothing to manage. A well-run marsh must sustain its stock.
+  const good = freshState({ fill: 0.55, outfallArea: 0 });
+  for (let n = 0; n < 24 * 4 * 365; n += 1) {
+    good.sluice.open = seaLevel(good.hours) > meanSurface(good);
+    step(good, 0.25);
+  }
+  const aliveGood = good.fish.filter((f) => f.alive).length;
+  ok(good.counts.recruitedEver > 0, 'a habitable marsh recruits fish', good.counts.recruitedEver);
+  ok(aliveGood > 34, 'a well-run marsh grows beyond its starting stock', `${aliveGood} > 34`);
+  ok(aliveGood <= BREEDING.carryingCapacity,
+    'the population is held by the carrying capacity', `${aliveGood} <= ${BREEDING.carryingCapacity}`);
+
+  // A barren marsh must not invent fish. Food is set on only a handful of cells,
+  // which is the case that exercises the food-cell floor: with no food anywhere
+  // the candidate search finds nothing and a different guard fires first, so a
+  // zero-food test would pass even with the floor deleted. Measured: while a pool
+  // is draining, 1-39 wet food cells occur for over a thousand steps with a valid
+  // candidate among them, so this range is real and not a contrivance.
+  const barren = freshState({ fill: 0.55, fish: 20, outfallArea: 0 });
+  barren.algae.fill(0);
+  let seeded = 0;
+  for (let k = 0; k < barren.depth.length && seeded < 5; k += 1) {
+    if (barren.depth[k] > 0.06) {
+      barren.algae[k] = 1;
+      seeded += 1;
+    }
+  }
+  // Same generous dt as the case below, so the only difference between the two is
+  // how many cells carry food. Otherwise "too few cells" could pass merely
+  // because the window was too short to produce anything.
+  const scarce = recruitFish(barren, 24 * 30);
+  ok(scarce === 0, 'a marsh with food on too few cells does not recruit', `${seeded} food cells, added ${scarce}`);
+
+  // Above the floor, the same marsh does recruit -- otherwise the guard above is
+  // just "never recruit" and proves nothing.
+  const fertile = freshState({ fill: 0.55, fish: 20, outfallArea: 0 });
+  fertile.algae.fill(0);
+  let seededMany = 0;
+  for (let k = 0; k < fertile.depth.length && seededMany < 400; k += 1) {
+    if (fertile.depth[k] > 0.06) {
+      fertile.algae[k] = 1;
+      seededMany += 1;
+    }
+  }
+  // Enough elapsed time to earn a fish: the rate is ~0.00035 per fish per hour,
+  // so a single day of one call accrues ~0.11 and correctly adds nothing. A
+  // one-day positive control would fail for a reason unrelated to the guard.
+  const plentiful = recruitFish(fertile, 24 * 30);
+  ok(plentiful > 0, 'a marsh with food on enough cells does recruit', `${seededMany} food cells, added ${plentiful}`);
+
+  // The counter must equal the log, so the readout cannot claim births the model
+  // did not record.
+  const logged = good.log.filter((e) => e.kind === 'recruited').reduce((a, e) => a + e.count, 0);
+  ok(logged === good.counts.recruitedEver,
+    'the recruitment counter agrees with the event log',
+    `counter ${good.counts.recruitedEver} vs log ${logged}`);
+
+  // And a drained marsh must still be unable to recover quickly, which is what
+  // makes a bad drain cost something.
+  const drained = freshState({ fill: 0.55, outfallArea: 2.2 });
+  for (let n = 0; n < 24 * 4 * 365; n += 1) {
+    drained.sluice.open = false;
+    step(drained, 0.25);
+  }
+  ok(drained.fish.filter((f) => f.alive).length === 0,
+    'a marsh cut off and drained through the outfall loses its whole stock',
+    drained.counts.strandedEver);
 }
 
 console.log('');

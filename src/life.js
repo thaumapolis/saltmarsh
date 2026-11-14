@@ -45,10 +45,13 @@ export function lightAt(depthM) {
  * grazing and washout, both applied by the caller, because washout is a
  * hydrological event and belongs to the water update.
  */
-export function algaeGrowth(biomass, depthM, nutrient, dt) {
+export function algaeGrowth(biomass, depthM, nutrient, dt, freshness = 0.1) {
   if (depthM <= 0) return -biomass * 0.05 * dt; // stranding on dry mud: die-off
   const light = lightAt(depthM);
-  const growthRate = 0.55 * Math.min(light, nutrient / (0.18 + nutrient));
+  // Freshness scales the light/nutrient rate rather than adding to it: sweeter
+  // water cannot make a dark pool productive. See freshnessFactor.
+  const growthRate =
+    0.55 * Math.min(light, nutrient / (0.18 + nutrient)) * freshnessFactor(freshness);
   const respiration = 0.12;
   const net = growthRate - respiration;
   return biomass * net * dt * (1 - biomass / 1.4);
@@ -194,6 +197,63 @@ export const RAINFALL_MM_PER_H_MEAN = 0.073;
 export function rainfallMmPerHForSeason(season) {
   return RAINFALL_MM_PER_H_MEAN * (1 - 0.45 * season);
 }
+
+/**
+ * What the salt in the water does to what grows.
+ *
+ * Freshness is 0 = full seawater, 1 = fresh. Before this function existed,
+ * freshness was computed every step from rain and inflow, stored, and read by
+ * nothing -- a number that could not change any outcome and was never shown,
+ * which makes the rain and outfall terms below it decoration. Grafting this onto
+ * algal growth is what gives draining a *benefit*: a freshened marsh grows more
+ * grass and algae for the same light, so a managed fresh marsh is more productive
+ * than a permanently saline one, and that gain has to be weighed against the fish
+ * you strand getting there.
+ *
+ * The curve is a mild optimum, not a monotone: grazing marshs carry productive
+ * vegetation across a broad brackish range, and very fresh water is not magically
+ * better for a tidal marsh than brackish. So salinity stress only bites at the
+ * fresh extreme, and the peak sits in brackish water.
+ */
+export const FRESHNESS = {
+  /** Where algal growth is best: brackish, roughly 1/3 fresh. */
+  optimum: 0.35,
+  /** How sharply growth falls off away from the optimum. */
+  tolerance: 0.55,
+};
+
+/**
+ * Growth multiplier from freshness, in (0, 1]. Multiplies the light/nutrient
+ * limited rate rather than adding to it, so freshening cannot create growth in
+ * the dark -- a pool with no light stays unproductive however sweet the water.
+ */
+export function freshnessFactor(freshness) {
+  const drift = (freshness - FRESHNESS.optimum) / FRESHNESS.tolerance;
+  return 0.55 + 0.45 * Math.exp(-drift * drift);
+}
+
+/**
+ * New fish produced in one step, as a fraction of the population.
+ *
+ * Without recruitment the population could only ever shrink: the first bad drain
+ * ended the game permanently, and measured over three years every strategy --
+ * sealed, always-open, tide-riding, cautious -- lost all 34 fish and finished at
+ * zero. That is not a management game, it is a countdown. Reproduction is what
+ * lets a well-run marsh sustain a population indefinitely and a badly-run one
+ * collapse and then recover, which is the difference between a puzzle and a system.
+ *
+ * Breeding is gated on there being *productive refuge*, not merely fish: food on
+ * the bed and a population that is not currently in trouble. So the marsh feeds
+ * the stock, and the stock is only worth keeping if the marsh is kept habitable.
+ */
+export const BREEDING = {
+  /** Fraction of the population recruited per simulated hour when conditions allow. */
+  ratePerHour: 0.00035,
+  /** Algal biomass on the bed needed before the marsh breeds fish at all. */
+  minFoodPerCell: 0.15,
+  /** Cap on the standing population, so the marsh has a carrying capacity. */
+  carryingCapacity: 60,
+};
 
 /**
  * Trophic accounting for the whole pool. Computed from the grid on demand rather

@@ -150,7 +150,7 @@ function hintText() {
   }
   if (!state.sluice.open && !state.outfall.open) {
     return {
-      text: `Both openings closed. The pool is cut off from the sea and can only lose water to evaporation.`,
+      text: `Both openings closed. The pool is cut off from the sea: rain freshens it, and evaporation concentrates the salt it is left holding, so which way it moves depends on the season. Nothing enters and nothing leaves but water.`,
       cls: '',
     };
   }
@@ -213,8 +213,17 @@ function updateReadout() {
   el('tideHeight').textContent = `${sea >= 0 ? '+' : ''}${sea.toFixed(2)} m`;
   el('wetLabel').textContent = `${((wet / total) * 100).toFixed(0)}%`;
   el('fishLabel').textContent = String(c.alive);
+  // The subtitle carries the population history, because "34 alive" after a year
+  // means something different if the marsh recruited 27 and lost 1 than if it is
+  // the same 34 slowly dying. Recruitment is read from the model's own counter,
+  // which a test asserts equals the event log, so the caption cannot claim a
+  // breeding season the model did not record.
+  const bred = state.counts.recruitedEver;
+  const bits = [];
+  if (bred > 0) bits.push(`+${bred} bred`);
+  if (c.lost > 0) bits.push(`${c.lost} lost`);
   el('fishLabel').nextElementSibling.textContent =
-    c.lost > 0 ? `${c.alive} alive · ${c.lost} lost` : 'fish alive';
+    bits.length > 0 ? bits.join(' · ') : 'fish alive';
 
   const hint = el('hint');
   const h = hintText();

@@ -85,6 +85,29 @@ Rain (~640 mm/yr) and evaporation (~666 mm/yr) nearly cancel over a year, so a
 sealed marsh neither fills forever nor dries out instantly — it can be managed
 down, and the season decides how fast.
 
+**Salt.** Rain dilutes the pool, admitted seawater salts it, and evaporation
+concentrates it, because water leaves and salt does not. All three are in the
+model, so a sealed marsh freshens through a wet winter and re-salinises as a dry
+summer evaporates it, instead of becoming a pond. Productivity follows: algal
+growth peaks in brackish water (about a third fresh) and falls off in full
+seawater or sweet water, so the water you keep is what the marsh grows.
+
+**The stock breeds.** A marsh with food on the bed and fish that are not currently
+dying adds to its population, up to a carrying capacity of 60; a drained or barren
+one does not. Without this the population could only shrink — measured over three
+years every strategy lost all 34 fish and finished at zero, which is a countdown,
+not a management game. With it, a well-run marsh grows past its starting stock and
+a bad drain costs something the marsh has to recover from. The header shows the
+history, e.g. `59 · +26 bred · 1 lost`.
+
+Three years of play, measured:
+
+| strategy | alive at end | fish lost | recruited | marsh surface |
+|---|---|---|---|---|
+| sealed, no outfall | **60 of 60** | 1 | 27 | +3.1 mm |
+| sealed, intake riding the tide | **60 of 60** | 0 | 26 | +2.6 mm |
+| outfall cut, intake riding the tide | **0** | 34 | 0 | −9.2 mm |
+
 Sediment makes the marsh surface itself a record of your water management.
 Regularly flooded cells build up toward ~9 mm/yr, fastest where the water is a
 5–20 cm sheet, which is the real feedback in a grazing marsh: flooding builds a
@@ -110,7 +133,7 @@ $ nix run .#default                    # (no-op: it is a file, open index.html)
 
 1. **build** — concatenate `src/*.js` into one self-contained `index.html`.
 2. **artifact guarantees** — no external file references, no web storage, no ES-module syntax left in the bundle.
-3. **model** — 52 behavioural checks with no browser: volume conservation to float precision, flow direction and its √head scaling, the level-surface invariant, the gradient decaying without amplifying, and the trade-off itself (that one strategy loses fish and another loses none, with every death recorded by the model as a stranding below the swim-depth threshold).
+3. **model** — 64 behavioural checks with no browser: volume conservation to float precision, flow direction and its √head scaling, the level-surface invariant, the gradient decaying without amplifying, and the trade-off itself (that one strategy loses fish and another loses none, with every death recorded by the model as a stranding below the swim-depth threshold).
 4. **browser** — 13 checks against the **built** file: no page errors, the canvas holds a shaded landscape rather than a flat fill, the scene buffer is genuinely 4 bytes per pixel, dragging rotates the view, and the whole thing runs and paints inside a sandboxed opaque-origin iframe that reports its own state — so silence is a failure rather than a pass.
 
 ## Design notes
