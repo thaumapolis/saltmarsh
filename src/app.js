@@ -150,7 +150,7 @@ function hintText() {
   }
   if (!state.sluice.open && !state.outfall.open) {
     return {
-      text: `Both openings closed. The pool is cut off from the sea: rain freshens it, and evaporation concentrates the salt it is left holding, so which way it moves depends on the season. Nothing enters and nothing leaves but water.`,
+      text: `Both openings closed. Rain freshens the pool; evaporation puts the salt back. Which way it moves is the season's decision, not yours.`,
       cls: '',
     };
   }
