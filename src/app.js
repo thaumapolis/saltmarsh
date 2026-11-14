@@ -7,7 +7,7 @@
  * model that contradicts its own caption is worse than one with no caption.
  */
 import { buildGround, GRID, wetArea, CELL_AREA_M2, worldUnits } from './marsh.js';
-import { camera, fitZoom, Scene } from './render.js';
+import { camera, fitZoom, horizonFor, project, Scene } from './render.js';
 import { initialState, seedFish, step, meanSurface, HOURS_PER_STEP, EPOCH_YEAR } from './sim.js';
 import { census, fishState, calendar } from './life.js';
 import { seaLevel, springNeapHours, CONSTITUENTS } from './tide.js';
@@ -39,9 +39,10 @@ let imageData = null;
  * Size the internal buffer to the canvas at a capped resolution.
  *
  * The buffer is deliberately lower than the CSS size: this renderer is a CPU
- * software rasteriser, so cost scales with pixels filled. 480 px wide keeps a
- * full frame comfortably inside 16 ms and upscales acceptably for a landscape,
- * where softness reads as distance rather than as a mistake.
+ * software rasteriser, so cost scales with pixels filled. RASTER_WIDTH px wide
+ * keeps a full frame inside 16 ms (measured below) and, since _quad now fills
+ * each cell's own footprint rather than its bounding box, the upscale is what
+ * turns 96x96 cells into continuous slopes instead of visible tiles.
  *
  * devicePixelRatio is applied to the BACKING store only, never to the raster
  * width. An earlier version multiplied the raster width by dpr as well, which
@@ -49,12 +50,76 @@ let imageData = null;
  * pixels) -- the exact opposite of the cap this function exists to impose. The
  * cap is on the simulation of light, not on the display's pixel count.
  */
+/**
+ * Raster width for the software renderer, before it is clamped to the canvas.
+ *
+ * Chosen by measurement, not taste, and the measurement overturned the
+ * assumption this number was originally set from. Fill cost is dominated by the
+ * ~9200 terrain quads -- the per-quad span setup -- not by pixels covered, so
+ * widening the buffer is nearly free: measured in Firefox on this machine,
+ * 480 px wide = 5.6 ms, 720 = 5.1 ms, 960 = 6.0 ms, 1010 = 6.3 ms per full
+ * frame, against a 16.7 ms budget. The old 480 cap was therefore solving a
+ * problem the rasteriser does not have, at the cost of the one thing the player
+ * actually sees: every cell got upscaled into a visible chunk.
+ *
+ * 1024 keeps the cap meaningful -- a 4K desktop window is still clamped -- while
+ * giving a desktop canvas roughly 1.4 buffer pixels per CSS pixel, so a terrain
+ * cell's projected footprint spans several pixels and the waterline reads as a
+ * slope instead of a staircase.
+ */
+const RASTER_WIDTH = 900;
+
+/**
+ * Upper bound on buffer pixel *count*, which is what the fill actually costs.
+ *
+ * Expressed as an area rather than a width because the two are not the same
+ * constraint: 1010x368 and 900x900 are both "about 900 wide" but differ 2.4x in
+ * pixels covered, and the renderer's cost tracks the second, not the first.
+ */
+const RASTER_AREA = 340_000;
+
+/**
+ * Camera pitch for a given view height, in radians.
+ *
+ * Steeper on a tall view (the relief reads as landscape and there is room for
+ * it), flatter on a short one (phone landscape, where the whole view is 239 px
+ * and a steep pitch projects the marsh taller than the frame). Derived from the
+ * canvas rather than from a breakpoint, so it also behaves sensibly on a
+ * resized desktop window and in the in-between sizes no media query covers.
+ */
+/**
+ * Height of an overlay element in the same units the framer uses: raster pixels.
+ *
+ * Returns 0 for an empty overlay -- #hint is display:none when there is nothing
+ * to say, and reserving 74 px for a caption that is not there is the difference
+ * between a marsh that fills the frame and one that floats in the middle of it.
+ */
+function cssBand(id) {
+  const node = document.getElementById(id);
+  if (node === null) return 0;
+  const rect = node.getBoundingClientRect();
+  if (rect.height === 0) return 0;
+  return Math.round((rect.height * internalWidth) / Math.max(1, cssWidthOfView()));
+}
+
+function cssWidthOfView() {
+  return canvas.getBoundingClientRect().width;
+}
+
 function resize() {
   const rect = canvas.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const cssW = Math.max(160, Math.round(rect.width));
   const cssH = Math.max(120, Math.round(rect.height));
-  internalWidth = Math.min(480, cssW);
+  // The cap is on the *buffer*, and the buffer's cost is dominated by how much
+  // screen it covers, so the cap is expressed per shape: a wide short canvas can
+  // afford more width for the same pixel count than a tall one. Measured at
+  // 1010x368 with the marsh filling the frame: 16 ms/frame, at the edge of the
+  // budget. At 720x262 it was 5.1 ms. The diagonal, not the width, is the cost.
+  const areaCap = Math.sqrt(RASTER_AREA);
+  const aspect = cssH > 0 ? cssW / cssH : 1;
+  const capW = Math.min(RASTER_WIDTH, areaCap * Math.sqrt(aspect));
+  internalWidth = Math.min(Math.round(capW), cssW);
   internalHeight = Math.max(1, Math.round((internalWidth * cssH) / cssW));
   // Backing store matches the device so the upscaled image is not further
   // resampled by the browser; the raster cost stays at internalWidth^2-ish.
@@ -62,7 +127,15 @@ function resize() {
   canvas.height = Math.round(cssH * dpr);
   scene = new Scene(internalWidth, internalHeight, ground);
   imageData = ctx.createImageData(internalWidth, internalHeight);
-  camera.zoom = fitZoom(ground, internalWidth, internalHeight, {});
+  // Camera pitch follows the canvas shape, not the viewport label. Relief is
+  // exaggerated 22x so it is visible from a steep angle, but on a short canvas
+  // the terrain's projected HEIGHT is what runs out of room, and the only lever
+  // left that does not shrink the marsh is looking at it more from above: less
+  // vertical extent per unit of marsh, so more marsh fits.
+  const topBand = cssBand('readout');
+  const bottomBand = cssBand('hint');
+  horizonFor(internalHeight, topBand, bottomBand);
+  camera.zoom = fitZoom(ground, internalWidth, internalHeight, { topBand, bottomBand });
 }
 
 let holderCanvas = null;
@@ -395,6 +468,18 @@ function explainStatics() {
 let last = performance.now();
 let readoutTick = 0;
 
+/**
+ * Paint one view: sky, then the marsh and its water at the current surface.
+ *
+ * Split out of frame() so the tests can time and force a repaint without
+ * racing the animation clock -- the same reason __saltmarsh.step exists.
+ */
+function paintView() {
+  scene.paintSky();
+  scene.paintWater(tideSurface(), state.algae);
+  commitPixels();
+}
+
 function frame(now) {
   const dtSeconds = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -411,9 +496,7 @@ function frame(now) {
     }
   }
 
-  scene.paintSky();
-  scene.paintWater(tideSurface(), state.algae);
-  commitPixels();
+  paintView();
 
   readoutTick += 1;
   if (readoutTick % 6 === 0) updateReadout();
@@ -442,6 +525,18 @@ window.__saltmarsh = {
   step,
   fitZoom,
   ground,
+  paintView,
+  /**
+   * Projection for the tests, taking elevation in METRES and resolving the world
+   * scale itself.
+   *
+   * Exposed rather than imported by tests because the app is bundled into ONE
+   * module instance: a test that imports render.js in Firefox gets a different
+   * `camera` object than the one the page is driving, and silently measures a
+   * camera nobody touched. That is exactly how a probe reported terrain bounds
+   * 2.5x smaller than the pixels for several rounds.
+   */
+  projectMetres: (x, y, elevM, w, h) => project(x, y, worldUnits(elevM), w, h),
   // The renderer's own buffer, so a test can compare what was intended against
   // what the canvas ended up showing. Without this the only way to notice a
   // stride error is to look at the screenshot.
